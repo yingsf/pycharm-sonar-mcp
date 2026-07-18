@@ -23,10 +23,10 @@ jobs:
         include:
           - label: macos-arm64
             os: macos-14
-            artifact_name: pycharm-sonar-mcp-macos-arm64
+            artifact_name: pycharm-code-quality-mcp-macos-arm64
           - label: windows-x64
             os: windows-latest
-            artifact_name: pycharm-sonar-mcp-windows-x64.exe
+            artifact_name: pycharm-code-quality-mcp-windows-x64.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -44,16 +44,16 @@ jobs:
           uv pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
+        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-code-quality-mcp.spec
 
       - name: Rename binary (POSIX)
         if: runner.os != 'Windows'
-        run: mv pyinstaller/dist/pycharm-sonar-mcp pyinstaller/dist/${{ matrix.artifact_name }}
+        run: mv pyinstaller/dist/pycharm-code-quality-mcp pyinstaller/dist/${{ matrix.artifact_name }}
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Move-Item -Path pyinstaller\dist\pycharm-sonar-mcp.exe -Destination pyinstaller\dist\${{ matrix.artifact_name }} -Force
+        run: Move-Item -Path pyinstaller\dist\pycharm-code-quality-mcp.exe -Destination pyinstaller\dist\${{ matrix.artifact_name }} -Force
 
       - name: Smoke --version (POSIX)
         if: runner.os != 'Windows'
@@ -103,7 +103,7 @@ jobs:
           cp scripts/install-macos.sh staging/
           cp scripts/install-windows.ps1 staging/
           # arm64 and Windows binaries are required (Intel macos-x64 is uploaded separately).
-          for required in pycharm-sonar-mcp-macos-arm64 pycharm-sonar-mcp-windows-x64.exe; do
+          for required in pycharm-code-quality-mcp-macos-arm64 pycharm-code-quality-mcp-windows-x64.exe; do
             if [ ! -f "staging/$required" ]; then
               echo "Required artifact missing: $required — aborting release."
               exit 1

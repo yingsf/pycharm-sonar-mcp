@@ -15,16 +15,16 @@
 # 用法:
 #   GH_TOKEN=ghp_xxx ./scripts/upload-macos-x64.sh v0.1.0
 #   GH_TOKEN=ghp_xxx ./scripts/upload-macos-x64.sh v0.1.0 --skip-build
-#       (--skip-build: 跳过构建,直接上传已有的 pyinstaller/dist/pycharm-sonar-mcp-macos-x64)
+#       (--skip-build: 跳过构建,直接上传已有的 pyinstaller/dist/pycharm-code-quality-mcp-macos-x64)
 #
 # 退出码: 0 成功; 非 0 失败(见各步骤)。
 # 兼容 macOS 系统 Bash 3.2。
 
 set -euo pipefail
 
-PROG="pycharm-sonar-mcp"
-ASSET_NAME="pycharm-sonar-mcp-macos-x64"
-REPO="yingsf/pycharm-sonar-mcp"
+PROG="pycharm-code-quality-mcp"
+ASSET_NAME="pycharm-code-quality-mcp-macos-x64"
+REPO="yingsf/pycharm-code-quality-mcp"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$REPO_ROOT/pyinstaller/dist"
@@ -55,7 +55,7 @@ fi
 ARCH="$(uname -m)"
 if [ "$ARCH" != "x86_64" ]; then
   err "本脚本必须在 Intel (x86_64) macOS 上运行。当前架构: $ARCH"
-  err "请在 Intel Mac 上执行; arm64 Mac 请用 CI 产出的 pycharm-sonar-mcp-macos-arm64。"
+  err "请在 Intel Mac 上执行; arm64 Mac 请用 CI 产出的 pycharm-code-quality-mcp-macos-arm64。"
   exit 1
 fi
 
@@ -92,7 +92,7 @@ else
   uv sync --python 3.12
   rm -rf "$DIST_DIR"
   # 用 --with 临时引入 pyinstaller,避免 uv pip install 装到与 uv run 不同的环境。
-  uv run --with pyinstaller pyinstaller --noconfirm --clean --distpath "$DIST_DIR" pyinstaller/pycharm-sonar-mcp.spec
+  uv run --with pyinstaller pyinstaller --noconfirm --clean --distpath "$DIST_DIR" pyinstaller/pycharm-code-quality-mcp.spec
   if [ ! -f "$DIST_DIR/$PROG" ]; then
     err "构建失败: 未找到 $DIST_DIR/$PROG"
     exit 1
@@ -112,7 +112,7 @@ esac
 
 # --- 上传到 Release ---
 log "上传 $ASSET_NAME 到 Release $TAG..."
-REL_JSON="/tmp/.psm_rel.json"
+REL_JSON="/tmp/.pcqm_rel.json"
 curl -s -H "Authorization: token $GH_TOKEN" \
   "https://api.github.com/repos/$REPO/releases/tags/$TAG" -o "$REL_JSON"
 
@@ -137,13 +137,13 @@ if [ -n "$ASSET_ID" ]; then
     "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID" -o /dev/null -w "delete: HTTP %{http_code}\n"
 fi
 
-UPLOAD_HTTP=$(curl -s -o /tmp/.psm_upload_resp -w "%{http_code}" \
+UPLOAD_HTTP=$(curl -s -o /tmp/.pcqm_upload_resp -w "%{http_code}" \
   -X POST -H "Authorization: token $GH_TOKEN" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @"$BINARY_PATH" \
   "$UPLOAD_URL?name=$ASSET_NAME")
 if [ "$UPLOAD_HTTP" != "201" ]; then
-  err "上传失败 (HTTP $UPLOAD_HTTP): $(head -c 300 /tmp/.psm_upload_resp)"
+  err "上传失败 (HTTP $UPLOAD_HTTP): $(head -c 300 /tmp/.pcqm_upload_resp)"
   exit 1
 fi
 SHA=$(shasum -a 256 "$BINARY_PATH" | awk '{print $1}')
@@ -152,14 +152,14 @@ log "上传成功。SHA-256: $SHA"
 # --- 刷新 SHA256SUMS ---
 log "刷新 SHA256SUMS..."
 curl -sL -H "Authorization: token $GH_TOKEN" \
-  "https://github.com/$REPO/releases/download/$TAG/SHA256SUMS" -o /tmp/.psm_sums || true
+  "https://github.com/$REPO/releases/download/$TAG/SHA256SUMS" -o /tmp/.pcqm_sums || true
 # 移除旧的 Intel 条目(若有),再追加新的,保持每行唯一。
-if [ -s /tmp/.psm_sums ]; then
-  grep -v "  $ASSET_NAME\$" /tmp/.psm_sums > /tmp/.psm_sums.new || true
+if [ -s /tmp/.pcqm_sums ]; then
+  grep -v "  $ASSET_NAME\$" /tmp/.pcqm_sums > /tmp/.pcqm_sums.new || true
 else
-  : > /tmp/.psm_sums.new
+  : > /tmp/.pcqm_sums.new
 fi
-echo "$SHA  $ASSET_NAME" >> /tmp/.psm_sums.new
+echo "$SHA  $ASSET_NAME" >> /tmp/.pcqm_sums.new
 
 SUMS_ASSET_ID=$(curl -s -H "Authorization: token $GH_TOKEN" \
   "https://api.github.com/repos/$REPO/releases/tags/$TAG" -o "$REL_JSON" \
@@ -177,10 +177,10 @@ fi
 curl -s -o /dev/null -w "SHA256SUMS 上传: HTTP %{http_code}\n" \
   -X POST -H "Authorization: token $GH_TOKEN" \
   -H "Content-Type: text/plain" \
-  --data-binary @/tmp/.psm_sums.new \
+  --data-binary @/tmp/.pcqm_sums.new \
   "$UPLOAD_URL?name=SHA256SUMS"
 
-rm -f /tmp/.psm_upload_resp /tmp/.psm_sums /tmp/.psm_sums.new /tmp/.psm_rel.json
+rm -f /tmp/.pcqm_upload_resp /tmp/.pcqm_sums /tmp/.pcqm_sums.new /tmp/.pcqm_rel.json
 
 log ""
 log "完成。Release $TAG 现已包含 ${ASSET_NAME}。"

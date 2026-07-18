@@ -1,29 +1,32 @@
 #!/usr/bin/env bash
-# install-macos.sh — download and install pycharm-sonar-mcp on macOS (arm64 or x64).
+# install-macos.sh — download and install pycharm-code-quality-mcp on macOS (arm64 or x64).
 #
-# Install location: ~/.local/bin/pycharm-sonar-mcp
+# Install location: ~/.local/bin/pycharm-code-quality-mcp
 # - No sudo. No writes outside the user's home.
 # - SHA-256 verified. Atomic replacement. Failure leaves the old binary intact.
 # - Supports paths with spaces and CJK user names.
 # - Optionally registers with Codex and Claude Code (warnings only if absent).
 # - Runs `doctor` at the end.
+# - Migrates from the legacy name `pycharm-sonar-mcp` if present.
 #
 # Env overrides:
-#   PYCHARM_SONAR_MCP_VERSION   tag/version to install (default: latest)
-#   PYCHARM_SONAR_MCP_BASE_URL  download base (default: GitHub releases)
+#   PYCHARM_CODE_QUALITY_MCP_VERSION   tag/version to install (default: latest)
+#   PYCHARM_CODE_QUALITY_MCP_BASE_URL  download base (default: GitHub releases)
 #
 # Bash 3.2 compatible (macOS system Bash).
 
 set -euo pipefail
 
-PROG_NAME="pycharm-sonar-mcp"
+PROG_NAME="pycharm-code-quality-mcp"
+LEGACY_PROG_NAME="pycharm-sonar-mcp"
 INSTALL_DIR="$HOME/.local/bin"
 INSTALL_PATH="$INSTALL_DIR/$PROG_NAME"
-TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t psm)"
+LEGACY_INSTALL_PATH="$INSTALL_DIR/$LEGACY_PROG_NAME"
+TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t pcqm)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-VERSION="${PYCHARM_SONAR_MCP_VERSION:-}"
-BASE_URL="${PYCHARM_SONAR_MCP_BASE_URL:-https://github.com/yingsf/pycharm-sonar-mcp/releases/download}"
+VERSION="${PYCHARM_CODE_QUALITY_MCP_VERSION:-}"
+BASE_URL="${PYCHARM_CODE_QUALITY_MCP_BASE_URL:-https://github.com/yingsf/pycharm-code-quality-mcp/releases/download}"
 
 log()  { printf '%s\n' "$*"; }
 err()  { printf 'error: %s\n' "$*" >&2; }
@@ -44,14 +47,20 @@ case "$ARCH" in
     ;;
 esac
 
+# --- migrate from legacy name ---
+if [ -e "$LEGACY_INSTALL_PATH" ] && [ "$LEGACY_INSTALL_PATH" != "$INSTALL_PATH" ]; then
+  log "Found legacy install at $LEGACY_INSTALL_PATH; removing it in favor of $INSTALL_PATH."
+  rm -f "$LEGACY_INSTALL_PATH"
+fi
+
 # --- resolve version ---
 if [ -z "$VERSION" ]; then
   if command -v curl >/dev/null 2>&1; then
-    VERSION="$(curl -fsSL https://api.github.com/repos/yingsf/pycharm-sonar-mcp/releases/latest \
+    VERSION="$(curl -fsSL https://api.github.com/repos/yingsf/pycharm-code-quality-mcp/releases/latest \
                2>/dev/null | grep -m1 '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/' || true)"
   fi
   if [ -z "$VERSION" ]; then
-    err "Could not determine latest version. Set PYCHARM_SONAR_MCP_VERSION manually."
+    err "Could not determine latest version. Set PYCHARM_CODE_QUALITY_MCP_VERSION manually."
     exit 1
   fi
 fi

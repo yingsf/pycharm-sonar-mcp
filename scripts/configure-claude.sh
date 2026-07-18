@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# configure-claude.sh — register pycharm-sonar-mcp with Claude Code on macOS/Linux.
+# configure-claude.sh — register pycharm-code-quality-mcp with Claude Code on macOS/Linux.
 #
 # Uses the executable's absolute path (no PATH dependency). Idempotent; --force updates.
 # If `claude` is not installed, prints a warning and exits 0.
@@ -7,7 +7,8 @@
 
 set -euo pipefail
 
-MCP_NAME="pycharm-sonar"
+MCP_NAME="pycharm-code-quality"
+LEGACY_MCP_NAME="pycharm-sonar"
 FORCE=0
 
 for arg in "$@"; do
@@ -24,16 +25,20 @@ for arg in "$@"; do
   esac
 done
 
-# Resolve executable.
+# Resolve executable (prefer new name; fall back to legacy name).
 EXE=""
-if command -v pycharm-sonar-mcp >/dev/null 2>&1; then
+if command -v pycharm-code-quality-mcp >/dev/null 2>&1; then
+  EXE="$(command -v pycharm-code-quality-mcp)"
+elif [ -x "$HOME/.local/bin/pycharm-code-quality-mcp" ]; then
+  EXE="$HOME/.local/bin/pycharm-code-quality-mcp"
+elif command -v pycharm-sonar-mcp >/dev/null 2>&1; then
   EXE="$(command -v pycharm-sonar-mcp)"
 elif [ -x "$HOME/.local/bin/pycharm-sonar-mcp" ]; then
   EXE="$HOME/.local/bin/pycharm-sonar-mcp"
 fi
 
 if [ -z "$EXE" ]; then
-  echo "error: pycharm-sonar-mcp executable not found." >&2
+  echo "error: pycharm-code-quality-mcp executable not found." >&2
   exit 1
 fi
 
@@ -49,11 +54,14 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 0
 fi
 
-# Check existing registration.
+# Check existing registration (current or legacy name).
 EXISTING=0
 if claude mcp list >/dev/null 2>&1; then
   if claude mcp list 2>/dev/null | grep -q "$MCP_NAME"; then
     EXISTING=1
+  elif claude mcp list 2>/dev/null | grep -q "$LEGACY_MCP_NAME"; then
+    EXISTING=1
+    claude mcp remove "$LEGACY_MCP_NAME" >/dev/null 2>&1 || true
   fi
 fi
 

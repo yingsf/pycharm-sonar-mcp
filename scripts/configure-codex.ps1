@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Register pycharm-sonar-mcp with the Codex CLI on Windows.
+  Register pycharm-code-quality-mcp with the Codex CLI on Windows.
 
 .DESCRIPTION
   Uses the .exe's absolute path (no PATH dependency). Idempotent. Supports -Force.
@@ -16,23 +16,31 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$McpName = "pycharm-sonar"
+$McpName = "pycharm-code-quality"
+$LegacyMcpName = "pycharm-sonar"
 
 function Write-Info($msg) { Write-Host $msg }
 function Write-Warn($msg) { Write-Host "warn: $msg" -ForegroundColor Yellow }
 function Write-Err($msg)  { Write-Host "error: $msg" -ForegroundColor Red }
 
-# Locate the executable.
+# Locate the executable (prefer new name; fall back to legacy name).
 $Exe = $null
-$candidate = Get-Command pycharm-sonar-mcp.exe -ErrorAction SilentlyContinue
+$candidate = Get-Command pycharm-code-quality-mcp.exe -ErrorAction SilentlyContinue
 if ($candidate) {
   $Exe = $candidate.Source
-} elseif (Test-Path "$env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe") {
-  $Exe = "$env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe"
+} elseif (Test-Path "$env:LOCALAPPDATA\pycharm-code-quality-mcp\pycharm-code-quality-mcp.exe") {
+  $Exe = "$env:LOCALAPPDATA\pycharm-code-quality-mcp\pycharm-code-quality-mcp.exe"
+} else {
+  $candidate = Get-Command pycharm-sonar-mcp.exe -ErrorAction SilentlyContinue
+  if ($candidate) {
+    $Exe = $candidate.Source
+  } elseif (Test-Path "$env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe") {
+    $Exe = "$env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe"
+  }
 }
 
 if (-not $Exe) {
-  Write-Err "pycharm-sonar-mcp.exe not found."
+  Write-Err "pycharm-code-quality-mcp.exe not found."
   Write-Err "Install it first."
   exit 1
 }
@@ -48,12 +56,15 @@ if (-not $codex) {
   exit 0
 }
 
-# Detect existing registration.
+# Detect existing registration (current or legacy name).
 $existing = $false
 try {
   $list = & codex mcp list 2>$null
   if ($list -match [regex]::Escape($McpName)) {
     $existing = $true
+  } elseif ($list -match [regex]::Escape($LegacyMcpName)) {
+    $existing = $true
+    try { & codex mcp remove $LegacyMcpName 2>$null | Out-Null } catch {}
   }
 } catch {
   $existing = $false

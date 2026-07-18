@@ -90,9 +90,9 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            artifact_name: pycharm-sonar-mcp-macos-x64
+            artifact_name: pycharm-code-quality-mcp-macos-x64
           - os: windows-latest
-            artifact_name: pycharm-sonar-mcp-windows-x64.exe
+            artifact_name: pycharm-code-quality-mcp-windows-x64.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -110,31 +110,31 @@ jobs:
           uv pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
+        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-code-quality-mcp.spec
 
       - name: Smoke --version (POSIX)
         if: runner.os != 'Windows'
-        run: ./pyinstaller/dist/pycharm-sonar-mcp --version
+        run: ./pyinstaller/dist/pycharm-code-quality-mcp --version
 
       - name: Smoke --version (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\pyinstaller\dist\pycharm-sonar-mcp.exe --version
+        run: .\pyinstaller\dist\pycharm-code-quality-mcp.exe --version
 
       - name: Smoke doctor (POSIX)
         if: runner.os != 'Windows'
-        run: ./pyinstaller/dist/pycharm-sonar-mcp doctor || true
+        run: ./pyinstaller/dist/pycharm-code-quality-mcp doctor || true
 
       - name: Smoke doctor (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\pyinstaller\dist\pycharm-sonar-mcp.exe doctor
+        run: .\pyinstaller\dist\pycharm-code-quality-mcp.exe doctor
         continue-on-error: true
 
       - name: Smoke MCP stdio initialize handshake (POSIX)
         if: runner.os != 'Windows'
         run: |
-          resp=$(echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' | ./pyinstaller/dist/pycharm-sonar-mcp serve | head -1)
+          resp=$(echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' | ./pyinstaller/dist/pycharm-code-quality-mcp serve | head -1)
           echo "Response: $resp"
           echo "$resp" | grep -q '"serverInfo"' || { echo "initialize did not return serverInfo"; exit 1; }
 
@@ -143,7 +143,7 @@ jobs:
         shell: pwsh
         run: |
           $init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
-          $resp = $init | .\pyinstaller\dist\pycharm-sonar-mcp.exe serve | Select-Object -First 1
+          $resp = $init | .\pyinstaller\dist\pycharm-code-quality-mcp.exe serve | Select-Object -First 1
           Write-Host "Response: $resp"
           if ($resp -notmatch '"serverInfo"') { throw "initialize did not return serverInfo" }
 
@@ -152,11 +152,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: pyinstaller/dist/pycharm-sonar-mcp
+          path: pyinstaller/dist/pycharm-code-quality-mcp
 
       - name: Upload binary artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: pyinstaller/dist/pycharm-sonar-mcp.exe
+          path: pyinstaller/dist/pycharm-code-quality-mcp.exe

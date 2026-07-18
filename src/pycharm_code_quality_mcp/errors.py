@@ -46,6 +46,17 @@ PROXY_INTERFERENCE: Final[str] = "PROXY_INTERFERENCE"
 BAD_REQUEST: Final[str] = "BAD_REQUEST"
 INTERNAL_ERROR: Final[str] = "INTERNAL_ERROR"
 
+# JetBrains MCP backend(通过标准 MCP 协议调用 PyCharm 的 JetBrains MCP Server)
+JETBRAINS_NOT_CONFIGURED: Final[str] = "JETBRAINS_NOT_CONFIGURED"
+JETBRAINS_CONNECTION_FAILED: Final[str] = "JETBRAINS_CONNECTION_FAILED"
+JETBRAINS_INVALID_CONFIG: Final[str] = "JETBRAINS_INVALID_CONFIG"
+JETBRAINS_REQUIRED_TOOL_MISSING: Final[str] = "JETBRAINS_REQUIRED_TOOL_MISSING"
+JETBRAINS_PROJECT_INDEXING: Final[str] = "JETBRAINS_PROJECT_INDEXING"
+JETBRAINS_BAD_RESPONSE: Final[str] = "JETBRAINS_BAD_RESPONSE"
+JETBRAINS_TOOL_FAILED: Final[str] = "JETBRAINS_TOOL_FAILED"
+JETBRAINS_TIMEOUT: Final[str] = "JETBRAINS_TIMEOUT"
+NO_ANALYSIS_BACKEND_AVAILABLE: Final[str] = "NO_ANALYSIS_BACKEND_AVAILABLE"
+
 
 class SonarMcpError(Exception):
     """所有暴露给 MCP 客户端的错误的基类
@@ -187,3 +198,42 @@ def bad_request(message: str) -> SonarMcpError:
 
 def internal_error(message: str) -> SonarMcpError:
     return SonarMcpError(INTERNAL_ERROR, message)
+
+
+# --- JetBrains MCP backend 错误工厂函数 ---
+
+
+def jetbrains_not_configured(message: str) -> SonarMcpError:
+    return SonarMcpError(JETBRAINS_NOT_CONFIGURED, message)
+
+
+def jetbrains_connection_failed(message: str) -> SonarMcpError:
+    return SonarMcpError(JETBRAINS_CONNECTION_FAILED, message)
+
+
+def jetbrains_invalid_config(message: str) -> SonarMcpError:
+    return SonarMcpError(JETBRAINS_INVALID_CONFIG, message)
+
+
+def jetbrains_required_tool_missing(message: str) -> SonarMcpError:
+    return SonarMcpError(JETBRAINS_REQUIRED_TOOL_MISSING, message)
+
+
+def jetbrains_project_indexing(message: str) -> SonarMcpError:
+    return SonarMcpError(JETBRAINS_PROJECT_INDEXING, message)
+
+
+def jetbrains_bad_response(message: str) -> SonarMcpError:
+    return SonarMcpError(JETBRAINS_BAD_RESPONSE, message)
+
+
+def jetbrains_tool_failed(message: str) -> SonarMcpError:
+    return SonarMcpError(JETBRAINS_TOOL_FAILED, message)
+
+
+def jetbrains_timeout(message: str) -> SonarMcpError:
+    return SonarMcpError(JETBRAINS_TIMEOUT, message)
+
+
+def no_analysis_backend_available(message: str) -> SonarMcpError:
+    return SonarMcpError(NO_ANALYSIS_BACKEND_AVAILABLE, message)

@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-  Download and install pycharm-sonar-mcp on Windows (x64).
+  Download and install pycharm-code-quality-mcp on Windows (x64).
 
 .DESCRIPTION
-  Install location: $env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe
+  Install location: $env:LOCALAPPDATA\pycharm-code-quality-mcp\pycharm-code-quality-mcp.exe
   - No administrator rights. No writes outside the user's profile.
   - SHA-256 verified. Atomic replacement. Failure leaves the old binary intact.
   - Supports paths with spaces and CJK user names.
   - Optionally registers with Codex and Claude Code (warnings only if absent).
   - Runs `doctor` at the end.
+  - Migrates from the legacy name `pycharm-sonar-mcp` if present.
 
   Requires Windows PowerShell 5.1+ or PowerShell 7+.
 
@@ -30,12 +31,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProgName = "pycharm-sonar-mcp"
-$McpName = "pycharm-sonar"
-$InstallDir = Join-Path $env:LOCALAPPDATA "pycharm-sonar-mcp"
+$ProgName = "pycharm-code-quality-mcp"
+$McpName = "pycharm-code-quality"
+$InstallDir = Join-Path $env:LOCALAPPDATA "pycharm-code-quality-mcp"
 $InstallPath = Join-Path $InstallDir "$ProgName.exe"
-$BaseUrl = "https://github.com/yingsf/pycharm-sonar-mcp/releases/download"
+$BaseUrl = "https://github.com/yingsf/pycharm-code-quality-mcp/releases/download"
 $ArchTag = "windows-x64"
+
+# Legacy locations (for migration).
+$LegacyProgName = "pycharm-sonar-mcp"
+$LegacyInstallDir = Join-Path $env:LOCALAPPDATA "pycharm-sonar-mcp"
 
 function Write-Step($m) { Write-Host $m }
 function Write-Warn2($m) { Write-Host "warn: $m" -ForegroundColor Yellow }
@@ -50,7 +55,7 @@ if (-not $IsWindows -and ($PSVersionTable.Platform -ne $null)) {
 # --- resolve version ---
 if (-not $Version) {
   try {
-    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/yingsf/pycharm-sonar-mcp/releases/latest" -ErrorAction Stop
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/yingsf/pycharm-code-quality-mcp/releases/latest" -ErrorAction Stop
     $Version = $rel.tag_name
   } catch {
     Write-Err2 "Could not determine latest version. Pass -Version <tag>."
@@ -63,10 +68,24 @@ $BinaryUrl = "$BaseUrl/$Version/$ProgName-$ArchTag.exe"
 $SumsUrl   = "$BaseUrl/$Version/SHA256SUMS"
 
 # --- temp dir + ensure install dir ---
-$TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("psm-" + [guid]::NewGuid().ToString("N"))
+$TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("pcqm-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $TmpDir | Out-Null
 try {
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+
+  # --- migrate from legacy name ---
+  $legacyExe = Join-Path $LegacyInstallDir "$LegacyProgName.exe"
+  if (Test-Path $legacyExe) {
+    Write-Step "Found legacy install at $legacyExe; removing it in favor of $InstallPath."
+    try { Remove-Item -LiteralPath $legacyExe -Force -ErrorAction Stop } catch {}
+  }
+  if ((Test-Path $LegacyInstallDir) -and ($LegacyInstallDir -ne $InstallDir)) {
+    # Remove the old directory if it is now empty (best-effort).
+    $remaining = Get-ChildItem -LiteralPath $LegacyInstallDir -Force -ErrorAction SilentlyContinue
+    if (-not $remaining) {
+      try { Remove-Item -LiteralPath $LegacyInstallDir -Recurse -Force -ErrorAction Stop } catch {}
+    }
+  }
 
   $BinTmp = Join-Path $TmpDir "$ProgName-$ArchTag.exe"
   $SumsTmp = Join-Path $TmpDir "SHA256SUMS"
@@ -79,7 +98,7 @@ try {
   $sumsContent = Get-Content -LiteralPath $SumsTmp -Encoding UTF8
   $expected = $null
   foreach ($line in $sumsContent) {
-    # lines look like: <sha>  pycharm-sonar-mcp-windows-x64.exe
+    # lines look like: <sha>  pycharm-code-quality-mcp-windows-x64.exe
     if ($line -match "^\s*([0-9A-Fa-f]{64})\s+\*?(.+)$") {
       $sha = $matches[1]; $name = $matches[2].Trim()
       if ($name -like "*$ArchTag*") { $expected = $sha.ToLower(); break }
