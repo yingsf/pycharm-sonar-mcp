@@ -422,11 +422,25 @@ def _client_supports_roots(session: Any) -> bool:
 
 
 async def _collect_roots_from_session(session: Any) -> list[str]:
-    """从客户端 session 拉取 roots 并把 URI 转换为本地路径"""
+    """从客户端 session 拉取 roots 并把 URI 转换为本地路径
+
+    给 ``list_roots()`` 加 5 秒超时:有些客户端声明了 Roots 能力却不响应
+    ``roots/list`` 请求,没有超时保护会让整个工具调用永久挂起。超时后回退到
+    环境变量,工作区仍可用。
+    """
     list_roots = getattr(session, "list_roots", None)
     if not callable(list_roots):
         return []
-    roots_resp = await list_roots()
+    try:
+        roots_resp = await asyncio.wait_for(list_roots(), timeout=5.0)
+    except TimeoutError:
+        _log.warning(
+            "Client declared Roots capability but did not respond to roots/list within 5s; falling back to SONAR_WORKSPACE_ROOTS"
+        )
+        return []
+    except Exception as e:
+        _log.debug("list_roots failed: %s", e)
+        return []
     out: list[str] = []
     for r in getattr(roots_resp, "roots", []):
         uri = str(getattr(r, "uri", ""))
