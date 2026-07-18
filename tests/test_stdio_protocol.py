@@ -176,8 +176,6 @@ def test_unknown_method_returns_jsonrpc_error() -> None:
         _shutdown(proc)
 
 
-
-
 def test_invalid_json_handled_gracefully() -> None:
     """Invalid JSON must not crash the server. The SDK emits a notification or error;
     the key contract is that the server stays alive and responds to a valid follow-up."""
