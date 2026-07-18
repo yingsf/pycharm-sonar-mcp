@@ -80,52 +80,12 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: pyinstaller/dist/${{ matrix.artifact_name }}
 
-  # Optional Intel build on macos-13. The free-tier Intel runner is heavily rate-limited,
-  # so this job frequently queues for a long time. It is intentionally NOT a dependency of
-  # the release job: arm64 + Windows ship regardless. When Intel capacity frees up and this
-  # job succeeds, re-run the release workflow to attach the Intel artifact.
-  build-macos-x64:
-    name: build (macos-x64, optional)
-    runs-on: macos-13
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Sync + add pyinstaller
-        run: |
-          uv sync --python 3.12
-          uv pip install pyinstaller
-
-      - name: Build with PyInstaller
-        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
-
-      - name: Rename binary
-        run: mv pyinstaller/dist/pycharm-sonar-mcp pyinstaller/dist/pycharm-sonar-mcp-macos-x64
-
-      - name: Smoke --version
-        run: pyinstaller/dist/pycharm-sonar-mcp-macos-x64 --version
-
-      - name: Smoke doctor
-        run: pyinstaller/dist/pycharm-sonar-mcp-macos-x64 doctor || true
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pycharm-sonar-mcp-macos-x64
-          path: pyinstaller/dist/pycharm-sonar-mcp-macos-x64
-
   release:
     name: publish release
-    # Depends only on the required builds. The optional Intel build may still be queued
-    # or may have failed; that must not block publishing arm64 + Windows.
+    # Depends on arm64 + Windows builds only. The Intel macOS (x86_64) binary is built
+    # locally on an Intel Mac and attached to this release by scripts/upload-macos-x64.sh,
+    # because the GitHub-hosted macos-13 (Intel) runner is heavily rate-limited for free
+    # accounts and cannot be relied upon in CI.
     needs: build-required
     runs-on: ubuntu-latest
     steps:
@@ -142,16 +102,13 @@ jobs:
           find release-assets -type f -exec cp {} staging/ \;
           cp scripts/install-macos.sh staging/
           cp scripts/install-windows.ps1 staging/
-          # arm64 and Windows binaries are required; the Intel macos-x64 is optional.
+          # arm64 and Windows binaries are required (Intel macos-x64 is uploaded separately).
           for required in pycharm-sonar-mcp-macos-arm64 pycharm-sonar-mcp-windows-x64.exe; do
             if [ ! -f "staging/$required" ]; then
               echo "Required artifact missing: $required — aborting release."
               exit 1
             fi
           done
-          if [ ! -f staging/pycharm-sonar-mcp-macos-x64 ]; then
-            echo "WARNING: Intel macos-x64 artifact missing; release will ship without it."
-          fi
           ls -la staging
 
       - name: Generate SHA256SUMS
