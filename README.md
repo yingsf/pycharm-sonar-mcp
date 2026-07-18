@@ -1,432 +1,436 @@
-# pycharm-sonar-mcp
+# pycharm-code-quality-mcp
 
-一个**本地**的 Model Context Protocol (MCP) 服务,用于桥接
+一个**本地**的 Model Context Protocol (MCP) 服务,把
 [Codex App](https://github.com/openai/codex) / Codex CLI / [Claude Code](https://www.anthropic.com/claude-code)
-与本机 PyCharm 中安装的 **SonarQube for IDE** 插件。
+连接到 PyCharm 的代码质量检查能力。
 
-它通过调用 SonarQube for IDE 在你本机已开放的本地 HTTP 接口,把 Sonar 代码分析结果暴露给你的 AI 编程助手,让助手能看到与 PyCharm 中完全相同的 findings,从而对自身改动进行验证。
+**默认后端是 PyCharm 内置的 JetBrains MCP Server(inspections)。**
+**SonarQube for IDE 是自动探测的可选增强后端** —— 没有安装 Sonar 插件时,
+工具仍然可以正常运行;安装了则同时执行两个后端,自动合并并去重。
 
 ```
 Codex App / Codex CLI / Claude Code
                 │
                 │  stdio (MCP)
                 ▼
-       pycharm-sonar-mcp
+      pycharm-code-quality-mcp
                 │
-                │  localhost HTTP (端口 64120–64130)
+        ┌───────┴────────┐
+        │                │
+        ▼                ▼
+  JetBrains MCP     SonarQube for IDE
+  (PyCharm 内置)     (可选增强插件)
+  localhost HTTP    localhost HTTP
+  (Streamable HTTP) (端口 64120–64130)
+        │                │
+        └───────┬────────┘
                 ▼
-   PyCharm + SonarQube for IDE 插件
+      合并 + 确定性自动去重
+                │
+                ▼
+        UnifiedFinding 列表
 ```
 
-> **本项目不是 SonarSource 官方产品。** 本项目不包含、不分发、不修改任何
-> SonarSource 分析器、插件、规则包或二进制组件。它仅调用用户本机 PyCharm 中
-> SonarQube for IDE 已开放的本地 HTTP 接口。它从不上传源代码,也不调用任何云端分析服务。
+> **本项目不是 SonarSource 或 JetBrains 官方产品。** 它不包含、不分发、不修改
+> 任何 SonarSource 分析器或 JetBrains 二进制组件。它只通过标准 MCP 协议调用
+> 用户本机已开放的本地接口。它从不上传源代码,也不调用任何云端分析服务。
 
 ---
 
 ## 目录
 
-- [为什么必须在每位开发者本机安装](#为什么必须在每位开发者本机安装)
-- [工作原理](#工作原理)
+- [产品定位](#产品定位)
 - [命名规范](#命名规范)
-- [前置条件](#前置条件)
-- [macOS — 安装](#macos--安装)
-- [macOS — 配置 Codex](#macos--配置-codex)
-- [macOS — 配置 Claude Code](#macos--配置-claude-code)
-- [macOS — doctor](#macos--doctor)
-- [macOS — 更新](#macos--更新)
-- [macOS — 卸载](#macos--卸载)
-- [macOS — 常见问题](#macos--常见问题)
-- [Windows — 安装](#windows--安装)
-- [Windows — 配置 Codex](#windows--配置-codex)
-- [Windows — 配置 Claude Code](#windows--配置-claude-code)
-- [Windows — doctor](#windows--doctor)
-- [Windows — 更新](#windows--更新)
-- [Windows — 卸载](#windows--卸载)
-- [Windows — 常见问题](#windows--常见问题)
+- [两种后端策略](#两种后端策略)
+- [MCP 工具一览(11 个)](#mcp-工具一览11-个)
+- [JetBrains MCP Server 启用方式](#jetbrains-mcp-server-启用方式)
+- [快速开始(macOS)](#快速开始macos)
+- [快速开始(Windows)](#快速开始windows)
+- [CLI 子命令](#cli-子命令)
+- [doctor 三段诊断](#doctor-三段诊断)
+- [自动去重机制](#自动去重机制)
+- [严重程度归一化](#严重程度归一化)
+- [单文件、多文件与 Git 变更分析](#单文件多文件与-git-变更分析)
+- [工作区安全与多项目限制](#工作区安全与多项目限制)
 - [Sonar 端口发现机制](#sonar-端口发现机制)
 - [localhost 与 127.0.0.1、HTTP 421 与 IPv6](#localhost-与-127001http-421-与-ipv6)
-- [单文件、多文件与 Git 变更分析](#单文件多文件与-git-变更分析)
-- [分批策略与部分失败语义](#分批策略与部分失败语义)
-- [工作区安全与多项目限制](#工作区安全与多项目限制)
-- [代理干扰](#代理干扰)
+- [从旧版本升级(pycharm-sonar-mcp)](#从旧版本升级pycharm-sonar-mcp)
 - [推荐的 Agent 提示词](#推荐的-agent-提示词)
+- [安全模型](#安全模型)
 - [本地开发](#本地开发)
 - [已知限制](#已知限制)
 
 ---
 
-## 为什么必须在每位开发者本机安装
+## 产品定位
 
-- **SonarQube for IDE 运行在你的 PyCharm 内。** 它的嵌入式 HTTP 服务只绑定本机的回环地址(`127.0.0.1`,端口 `64120`–`64130`),无法从其他机器或共享服务器访问。
-- **源代码永远不会离开你的机器。** MCP 服务只与你本机的 PyCharm 通信,不上传代码,也不调用任何云端分析服务。
-- **每位开发者的 PyCharm 跟踪不同的工作树。** 单一远程服务器无法知道你打开了哪个项目、哪些文件已被索引。桥接层必须与编辑器同处一台机器。
-
-因此**不能**把它部署为团队共享的单一远程服务。
-
-## 工作原理
-
-1. 带有 SonarQube for IDE 的 PyCharm 在回环端口的 `64120`–`64130` 范围内开放 `GET /sonarlint/api/status` 与 `POST /sonarlint/api/analysis/files` 两个接口。
-2. `pycharm-sonar-mcp` 扫描该端口范围,验证每个响应服务确实属于 Sonar,根据目标文件匹配到正确的 PyCharm 实例,然后调用分析接口并把 findings 返回给 MCP 客户端(Codex/Claude)。
-3. findings 保留 Sonar 的原始字段:`ruleKey`、`message`、`severity`、`filePath`、`textRange`。未来插件版本可能返回的未知字段会被兼容保留。
-
-服务仅使用 **stdio** 传输,绝不绑定公网或局域网地址;`stdout` 专门用于 MCP JSON-RPC 通信,所有日志写入 `stderr`。
+- **JetBrains inspections 是基础能力。** 通过 PyCharm 自带的 MCP Server
+  (`Tools → MCP Server`)暴露的 `get_project_status` / `get_file_problems`,
+  获得与 IDE 完全一致的 inspection 结果。
+- **SonarQube for IDE 是可选增强。** 若你安装了该插件,工具会自动探测并在
+  `auto` 模式下同时运行 Sonar;两个来源的 findings 会经过确定性自动去重后返回。
+- **源代码永不离开你的机器。** MCP 服务只与本机的 PyCharm 通信,不上传代码,
+  也不调用任何云端分析服务。
+- **每位开发者的 PyCharm 跟踪不同的工作树。** 因此**不能**把它部署为团队共享的
+  单一远程服务 —— 桥接层必须与编辑器同处一台机器。
 
 ## 命名规范
 
 | 概念 | 名称 |
 | --- | --- |
-| Git 仓库名 | `pycharm-sonar-mcp` |
-| Python 分发名 | `pycharm-sonar-mcp` |
-| Python 导入包名 | `pycharm_sonar_mcp` |
-| 命令行程序名 | `pycharm-sonar-mcp` |
-| MCP 服务配置名 | `pycharm-sonar` |
+| Git 仓库名 | `pycharm-code-quality-mcp` |
+| Python 分发名 | `pycharm-code-quality-mcp` |
+| Python 导入包 | `pycharm_code_quality_mcp` |
+| 主命令 | `pycharm-code-quality-mcp` |
+| MCP 服务名 | `pycharm-code-quality` |
+| 显示名 | PyCharm Code Quality MCP |
 
-## 前置条件
+**兼容旧名**(全部继续可用,通过薄兼容层转发到同一实现):
 
-- **PyCharm** 处于运行状态,已安装 **SonarQube for IDE** 插件,并已打开你的项目。
-- 插件后端必须已启动:在 PyCharm 中至少打开过一个源文件,触发 Sonar 的首次分析(本地 HTTP 服务只有在此之后才会出现)。
-- 已安装 **Codex App / Codex CLI** 和/或 **Claude Code**(可选,但通常是预期场景)。
-- 第一版正式支持平台:**macOS 13+(Apple Silicon 或 Intel)** 与 **Windows 11 x64**。Linux 源码级兼容,但不是第一版正式发布平台。
+| 旧名 | 类型 |
+| --- | --- |
+| `pycharm-sonar-mcp` | 旧命令 |
+| `pycharm-sonar` | 旧 MCP 配置名 |
+| `pycharm_sonar_mcp` | 旧 Python 包 |
+| `SONAR_IDE_PORT` / `SONAR_WORKSPACE_ROOTS` | 旧环境变量 |
 
----
+## 两种后端策略
 
-## macOS — 安装
+统一工具的 `backend_mode` 参数控制后端选择:
 
-安装位置:`~/.local/bin/pycharm-sonar-mcp`(无需 `sudo`,不向家目录外写入任何内容)。
+| `backend_mode` | 行为 |
+| --- | --- |
+| `auto`(默认) | JetBrains 优先;Sonar 可用时自动加入;合并 + 去重 |
+| `jetbrains` | 只运行 JetBrains inspections |
+| `sonar` | 只运行 SonarQube for IDE(降级模式,旧用户兼容) |
+| `all` | 两个后端都必须尝试;一个失败时返回 `partialSuccess=true` |
+
+**`auto` 模式判定逻辑**:
+
+- JetBrains 可用 + Sonar 可用 → 两者并行,合并去重。
+- JetBrains 可用 + Sonar 未安装 → JetBrains 单独成功,`success=true`,
+  Sonar 状态 `unavailable`,添加 notice,**不算** partial failure。
+- JetBrains 不可用 + Sonar 可用 → Sonar 降级运行,`degradedMode=true`。
+- 两者都不可用 → `success=false`,错误码 `NO_ANALYSIS_BACKEND_AVAILABLE`。
+
+## MCP 工具一览(11 个)
+
+### 统一默认工具(4 个,README 与 Agent 指令推荐)
+
+| 工具 | 作用 |
+| --- | --- |
+| `code_quality_status` | 报告两个后端的完整状态(configured / available / projectReady / indexing / instances) |
+| `code_quality_analyze_files` | 分析 1–200 个绝对路径文件,默认 `backend_mode=auto`,确定性去重 |
+| `code_quality_analyze_git_changes` | 收集 git 变更(staged/unstaged/untracked,相对 `base_ref`)并统一分析 |
+| `code_quality_clear_cache` | 清除所有后端的内存缓存 |
+
+返回 **`UnifiedFinding`** 模型:`id` / `sources` / `ruleIds` / `severity` /
+`category` / `filePath` / `range` / `duplicateCount` / `deduplication` /
+`sourceFindings`(完整保留所有原始来源)。
+
+### JetBrains 专用工具(3 个)
+
+| 工具 | 作用 |
+| --- | --- |
+| `jetbrains_ide_status` | 探测 JetBrains MCP 配置/连接/项目状态/必需工具是否暴露 |
+| `jetbrains_inspect_files` | 用 JetBrains inspections 分析 1–200 个文件(单 session 复用,单文件失败不影响其他) |
+| `jetbrains_inspect_git_changes` | 收集 git 变更并用 JetBrains inspections 分析 |
+
+返回 JetBrains 原生 problem 列表(1-based 行列号),不做跨后端合并。
+
+### 旧 Sonar 工具(4 个,契约保持不变)
+
+| 工具 | 作用 |
+| --- | --- |
+| `sonar_ide_status` | 扫描端口 `64120..64130`,报告 SonarQube for IDE 实例 |
+| `sonar_analyze_files` | 用 Sonar 分析 1–200 个文件(自动分批 50/批) |
+| `sonar_analyze_git_changes` | 收集 git 变更并用 Sonar 分析 |
+| `sonar_clear_cache` | 清除 project→port 内存缓存 |
+
+返回原有 `AnalysisResult` / `IdeStatusResult` / `ClearCacheResult` 契约。
+
+## JetBrains MCP Server 启用方式
+
+1. 打开 PyCharm → **Settings → Tools → MCP Server**。
+2. 勾选 **Enable MCP Server**。
+3. 在 **Exposed Tools** 中启用:
+   - `get_project_status`
+   - `get_file_problems`
+4. 点击 **Copy HTTP Stream Config**(会复制一段 JSON 到剪贴板)。
+5. 把这段 JSON 粘贴给配置命令:
+
+   ```bash
+   pycharm-code-quality-mcp jetbrains configure --json '<paste config here>'
+   ```
+
+   向导会自动识别 URL 和 headers(支持 flat / `transport` 嵌套 / `mcpServers`
+   三种 JSON 形态),保存配置,然后真实连接做 `initialize` + `tools/list`
+   校验,确认两个必需工具都已暴露。
+
+**安全约束**:JetBrains URL 只允许 `localhost` / `127.0.0.1` / `::1`,
+远程 IP、局域网地址、公网域名一律拒绝。headers 不会进入日志。POSIX 上配置文件
+以 `0600` 权限保存。
+
+## 快速开始(macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yingsf/pycharm-sonar-mcp/main/scripts/install-macos.sh \
+# 1) 下载并安装二进制(arm64)
+curl -fsSL https://github.com/yingsf/pycharm-code-quality-mcp/releases/latest/download/install-macos.sh \
   | bash
+
+# 2) 配置 JetBrains HTTP Stream(参见上一节)
+pycharm-code-quality-mcp jetbrains configure
+
+# 3) 运行 doctor 验证
+pycharm-code-quality-mcp doctor
 ```
 
-或在克隆仓库后:
+Intel macOS 用 `upload-macos-x64.sh` 产物。
 
-```bash
-bash scripts/install-macos.sh
-```
-
-安装脚本会:
-
-- 检测 `arm64` 还是 `x64`,
-- 下载匹配的二进制文件和 `SHA256SUMS`,
-- 校验 SHA-256(校验失败时保留已有旧版本不动),
-- 原子替换旧二进制,
-- 尽力注册 Codex 和 Claude Code(未安装时仅告警,不阻断),
-- 运行 `doctor`。
-
-需要 Bash 3.2+(系统自带的 `/bin/bash` 即可)和 `curl` 或 `wget`。
-
-## macOS — 配置 Codex
-
-如果安装脚本未能发现 Codex,可手动用二进制的绝对路径注册:
-
-```bash
-codex mcp add pycharm-sonar -- "$HOME/.local/bin/pycharm-sonar-mcp"
-```
-
-重新执行 `scripts/configure-codex.sh --force` 可更新注册项。该脚本幂等,使用二进制绝对路径(不依赖 `PATH`)。注册完成后需**重启 Codex App** 或重载 Codex CLI MCP。
-
-验证:
-
-```bash
-codex mcp list
-```
-
-## macOS — 配置 Claude Code
-
-```bash
-claude mcp add \
-  --transport stdio \
-  --scope user \
-  pycharm-sonar \
-  -- "$HOME/.local/bin/pycharm-sonar-mcp"
-```
-
-或重新执行 `scripts/configure-claude.sh --force`。注册完成后需在 Claude Code 中**重载 MCP**。
-
-验证:
-
-```bash
-claude mcp list
-```
-
-## macOS — doctor
-
-```bash
-pycharm-sonar-mcp doctor
-pycharm-sonar-mcp doctor --file /absolute/path/to/your/file.py
-```
-
-`doctor` 会打印操作系统/架构/版本、localhost IPv4 状态、`64120`–`64130` 上的 Sonar 实例、HTTP authority 行为(421 检查)、代理干扰、Codex/Claude 是否存在、Git 是否存在以及工作区配置。任一硬性检查失败即返回非零退出码。它**不会**启动 MCP 服务。
-
-## macOS — 更新
-
-重新执行安装脚本即可:它会下载最新发布、校验 checksum 并原子替换二进制:
-
-```bash
-bash scripts/install-macos.sh
-```
-
-如需固定版本:
-
-```bash
-PYCHARM_SONAR_MCP_VERSION=v0.1.0 bash scripts/install-macos.sh
-```
-
-## macOS — 卸载
-
-```bash
-bash scripts/uninstall-macos.sh                 # 仅删除二进制
-bash scripts/uninstall-macos.sh --purge         # 同时移除 Codex 与 Claude 注册项
-```
-
-卸载绝不会删除 PyCharm、SonarQube for IDE 插件或其他 MCP 服务。
-
-## macOS — 常见问题
-
-- **`pycharm-sonar-mcp doctor` 提示找不到 Sonar 实例。** 请在 PyCharm 中打开你的项目,并至少打开一个源文件以触发 Sonar 后端启动。
-- **`IDE_MULTIPLE_MATCHES`。** 同时打开了多个 PyCharm 项目窗口。请关闭重复窗口,或为排障设置 `SONAR_IDE_PORT=6412X`。
-- **HTTP 421 / Misdirected Request。** 正常情况下不应出现 — 自定义 transport 始终发送 `Host: localhost:<port>`。如遇到请提 issue,这通常意味着 transport 出现回归。
-- **编辑器看不到工具。** 注册完成后请重启 Codex App 或重载 Claude Code MCP。
-- **需要在防火墙开放端口吗?** 不需要。`64120`–`64130` 仅属于本机回环服务,**不应**对外开放。
-
----
-
-## Windows — 安装
-
-安装位置:`%LOCALAPPDATA%\pycharm-sonar-mcp\pycharm-sonar-mcp.exe`
-(无需管理员权限、不写入 `Program Files`、不修改系统级 `PATH`)。
-
-**PowerShell**(默认方式;需要 Windows PowerShell 5.1+ 或 PowerShell 7+):
+## 快速开始(Windows)
 
 ```powershell
-irm https://raw.githubusercontent.com/yingsf/pycharm-sonar-mcp/main/scripts/install-windows.ps1 | iex
+# 1) 下载 install-windows.ps1 并执行
+iex (irm https://github.com/yingsf/pycharm-code-quality-mcp/releases/latest/download/install-windows.ps1)
+
+# 2) 配置 JetBrains HTTP Stream
+pycharm-code-quality-mcp jetbrains configure
+
+# 3) 运行 doctor
+pycharm-code-quality-mcp doctor
 ```
 
-或在克隆仓库后:
+Windows 不需要 Python、Git Bash、WSL 或管理员权限。
 
-```powershell
-pwsh -File scripts\install-windows.ps1
+## CLI 子命令
+
+```
+pycharm-code-quality-mcp                       # 等价于 serve
+pycharm-code-quality-mcp serve                 # 运行 stdio MCP 服务(默认)
+pycharm-code-quality-mcp --version
+pycharm-code-quality-mcp doctor [--file PATH]  # 三段诊断,不启动 MCP
+pycharm-code-quality-mcp setup [--json '...']  # 非交互式首次配置向导
+
+pycharm-code-quality-mcp jetbrains configure [--json '...']
+pycharm-code-quality-mcp jetbrains status
+pycharm-code-quality-mcp jetbrains clear
+
+pycharm-code-quality-mcp sonar status          # 扫描 Sonar 实例
 ```
 
-安装脚本会:
+环境变量:
 
-- 下载 `pycharm-sonar-mcp-windows-x64.exe` 与 `SHA256SUMS`,
-- 校验 SHA-256(`Get-FileHash`;校验失败时保留旧版本不动),
-- 原子替换旧 `.exe`,
-- 尽力注册 Codex 和 Claude Code(未安装时仅告警),
-- 运行 `doctor`。
+| 变量 | 作用 |
+| --- | --- |
+| `JETBRAINS_MCP_URL` | JetBrains MCP 端点(覆盖配置文件) |
+| `JETBRAINS_MCP_HEADERS_JSON` | 附加 headers(JSON) |
+| `JETBRAINS_INSPECTION_TIMEOUT_MS` | 单文件 inspection 超时(默认 30000) |
+| `JETBRAINS_MAX_FILES` | 单次调用最大文件数(上限 200) |
+| `SONAR_IDE_PORT` | 显式指定 Sonar 端口 |
+| `SONAR_WORKSPACE_ROOTS` | 允许的工作区根(os.pathsep 分隔) |
+| `PYCHARM_CODE_QUALITY_MCP_LOG_LEVEL` | 日志级别(DEBUG/INFO/WARNING/ERROR) |
 
-**ExecutionPolicy:** 上面的单行命令不会永久修改你的 `ExecutionPolicy`。若直接运行 `.ps1` 被策略拦截,可使用:
+## doctor 三段诊断
 
-```powershell
-pwsh -ExecutionPolicy Bypass -File scripts\install-windows.ps1
+```
+PyCharm Sonar MCP Doctor
+
+== General ==
+[OK] Operating system: macOS 26.5 x64
+[OK] MCP version: 1.0.0
+...
+
+== JetBrains ==
+[OK] JetBrains MCP configured: http://localhost:63342/mcp
+[OK] URL is loopback
+[OK] Tools exposed: get_file_problems, get_project_status
+[OK] Project ready
+
+== Sonar ==
+[OK] SonarQube for IDE found: ports 64120
+[OK] HTTP authority (localhost): status OK (PyCharm)
+
+== Summary ==
+[OK] Code quality analysis available through JetBrains inspections
+
+Result: 0 failure(s), 0 warning(s)
 ```
 
-**Windows 路径格式:** 安装脚本与工具同时接受 `C:\Project\src\a.py` 与混合分隔符(`C:/Project/src/a.py`)。盘符大小写(`c:` 与 `C:`)以及大小写不敏感比较已正确处理。
+- **Sonar 未安装时 doctor 不整体失败**(只报 INFO/WARN)。
+- **JetBrains 未配置但 Sonar 可用**:doctor 报 degraded 警告,旧 Sonar 工具仍可用。
 
-## Windows — 配置 Codex
+## 自动去重机制
 
-```powershell
-codex mcp add pycharm-sonar -- "$env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe"
-```
+`code_quality_*` 工具默认 `deduplication_mode=balanced`。去重是**确定性**的
+(相同输入永远得到相同输出,不联网、不调用模型),支持 4 种模式:
+`conservative` / `balanced`(默认)/ `aggressive` / `off`。
 
-或重新执行 `scripts\configure-codex.ps1 -Force`。使用 `.exe` 的绝对路径(不依赖 `PATH`)。注册后需**重启 Codex App**。
+**6 维相似度评分**(权重相加为 1.00):
 
-验证:
+| 维度 | 权重 | 信号来源 |
+| --- | --- | --- |
+| location | 0.30 | 同文件 + 范围交并比 / 起始行距离 |
+| message | 0.25 | token Jaccard + SequenceMatcher + 标识符重合 |
+| ruleEquivalence | 0.20 | 同规则或已知跨后端等价规则对 |
+| anchor | 0.15 | 问题行±1 行代码的 SHA-256(不输出源码) |
+| category | 0.07 | 18 个稳定 category 是否一致 |
+| identifier | 0.03 | 消息中标识符集合的 Jaccard |
 
-```powershell
-codex mcp list
-```
+**4 个自动合并条件**(满足任一即合并):
 
-## Windows — 配置 Claude Code
+- **A**:同文件 + 范围相交 + 规范化消息完全相同。
+- **B**:同文件 + 显式规则等价 + 起始行距离 ≤ 2 + messageScore ≥ 0.55。
+- **C**:同文件 + 代码锚点相同 + category 相同 + messageScore ≥ 0.82。
+- **D**:综合得分 ≥ 阈值(balanced=0.86)+ 至少两个强信号成立。
 
-```powershell
-claude mcp add `
-  --transport stdio `
-  --scope user `
-  pycharm-sonar `
-  -- "$env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe"
-```
+**禁止合并**:不同文件、category 冲突(spelling↔type_mismatch、security↔style、
+syntax_error↔documentation)、距离过远且无 anchor/规则等价、仅严重程度相同、
+仅消息中出现同一变量名。
 
-或重新执行 `scripts\configure-claude.ps1 -Force`。注册后需在 Claude Code 中**重载 MCP**。
+**聚类保护**:用 complete-link(组内最远两成员仍需满足合并条件),避免
+"A~B、B~C 但 A!~C" 的传递链错误扩大分组。
 
-验证:
+**不丢失证据**:合并后的 `UnifiedFinding.sourceFindings` 完整保留所有原始来源;
+中置信度(0.70–0.86)的对子进入 `possibleDuplicateGroups`,不自动合并。
 
-```powershell
-claude mcp list
-```
+## 严重程度归一化
 
-## Windows — doctor
+两个后端的不同严重级别词汇表统一映射到 6 个稳定等级:
 
-```powershell
-& "$env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe" doctor
-& "$env:LOCALAPPDATA\pycharm-sonar-mcp\pycharm-sonar-mcp.exe" doctor --file C:\Path\To\file.py
-```
+| 统一等级 | rank | Sonar | JetBrains |
+| --- | --- | --- | --- |
+| BLOCKER | 5 | BLOCKER | — |
+| CRITICAL | 4 | CRITICAL | ERROR |
+| MAJOR | 3 | MAJOR | WARNING、SERVER PROBLEM |
+| MINOR | 2 | MINOR | WEAK WARNING、TYPO |
+| INFO | 1 | INFO | INFORMATION |
+| UNKNOWN | 0 | — | 其他 |
 
-输出与检查项与 macOS 的 `doctor` 完全对等(操作系统行会显示 `Windows ... x64`)。任一硬性检查失败即返回非零退出码。它**不会**启动 MCP 服务。
-
-## Windows — 更新
-
-```powershell
-pwsh -File scripts\install-windows.ps1 -Force
-```
-
-如需固定版本:
-
-```powershell
-pwsh -File scripts\install-windows.ps1 -Version v0.1.0
-```
-
-## Windows — 卸载
-
-```powershell
-pwsh -File scripts\uninstall-windows.ps1                 # 仅删除二进制
-pwsh -File scripts\uninstall-windows.ps1 -Purge          # 同时移除 Codex 与 Claude 注册项
-```
-
-绝不会删除 PyCharm、SonarQube for IDE 插件或其他 MCP 服务。
-
-## Windows — 常见问题
-
-- **需要哪个 PowerShell 版本?** Windows PowerShell 5.1(Windows 10/11 自带)或 PowerShell 7+。无论哪种,安装脚本都会打印其各项检查结果。
-- **需要永久修改 ExecutionPolicy 吗?** 不需要。使用 `irm | iex` 单行命令,或对单次调用使用 `-ExecutionPolicy Bypass`。
-- **没有安装 Python 能用吗?** 能。发布的产物是 PyInstaller 产出的独立 `.exe`,不需要 Python、Git Bash 或 WSL。
-- **长路径/空格/中文用户名?** 全部支持。盘符大小写已归一;Junction/符号链接逃逸会被拒绝。
-- **需要在 Windows Defender 防火墙开放 64120–64130 端口吗?** 不需要。它们只属于本机回环,对外开放属于安全风险且无必要。
-
----
-
-## Sonar 端口发现机制
-
-端口**绝不是**写死的 `64120`。发现策略按以下顺序进行:
-
-1. **显式端口** — 若设置了 `SONAR_IDE_PORT`,它必须是 `64120..64130` 内的整数,且必须是有效的 Sonar 服务。否则调用会明确报错(不静默切换到其他端口)。该变量仅用于排障。
-2. **项目端口缓存** — 内存中的 `project_root → port` 映射(从不持久化到磁盘)。
-3. **扫描** `64120..64130`,对每个响应者调用 `GET /sonarlint/api/status` 进行校验。仅当返回 HTTP 200、可解析为 JSON、是 JSON 对象,且对象看起来属于 Sonar 状态响应(含 `ideName`、`version`、`connectedMode` 等可识别字段)时才视为有效。仅凭 TCP 端口可连接**不算**有效。
-4. **匹配** — 若存在多个实例,用单个目标文件对每个实例探针调用(`POST /sonarlint/api/analysis/files`),只保留能够分析该文件的实例。返回"文件未索引"的实例会被排除。
-5. **缓存** 解析得到的 `project_root → port`。
-6. **清缓存并重试一次** — 仅在连接错误、超时、404、421、非 JSON 或非 Sonar 响应时触发。从不进行超过一次的重试。对于"文件未索引"、"文件类型不支持"、"正在 Indexing"、"被限流"等错误,不视为端口变化。
-
-当**多个实例都能索引该文件**时,工具返回 `IDE_MULTIPLE_MATCHES`,建议关闭重复项目窗口或设置 `SONAR_IDE_PORT`。
-
-## localhost 与 127.0.0.1、HTTP 421 与 IPv6
-
-SonarQube for IDE 会校验 HTTP `Host`/authority:
-
-- 携带 `Host: 127.0.0.1:<port>` 的请求会返回 **HTTP 421 Misdirected Request**。只有 `Host: localhost:<port>` 才被接受。
-- 部分系统中 `localhost` 会优先解析为 `::1`(IPv6),而插件可能只绑定 `127.0.0.1`(IPv4)。朴素客户端会因此走 IPv6 而失败。
-
-`pycharm-sonar-mcp` 通过一个**自定义 HTTP transport** 同时解决这两个问题:
-
-- 向 `127.0.0.1:<port>` 打开 TCP 套接字(始终走 IPv4 回环),
-- 请求中发送 `Host: localhost:<port>` 与 `Origin: http://localhost`,
-- 从不把 URL 永久改写为 `http://127.0.0.1`,
-- 忽略 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`(`trust_env=False`)。
-
-因此网络层走 IPv4 回环,应用层 authority 保持 `localhost`。IPv4-only 绑定、IPv6-first 解析以及 421 行为均有对应单测覆盖。
+合并后问题的最终 severity 取所有来源中的**最高等级**。原始 severity 在
+`sourceFindings.raw` 中完整保留。
 
 ## 单文件、多文件与 Git 变更分析
 
-- **`sonar_analyze_files`** — 传入 1–200 个**绝对**路径。路径必须真实存在、是普通文件,且位于配置的工作区内。它们会被规范化、去重并排序。同一调用中包含来自多个项目根目录的文件会被拒绝(`MULTIPLE_PROJECT_ROOTS`)。
-- **`sonar_analyze_git_changes`** — 传入 `project_root`(以及可选的 `base_ref`、`include_untracked`、`include_staged`、`include_unstaged`)。它使用 NUL 分隔的 git 输出(`git diff --name-only -z`、`git ls-files -z` 等)收集变更文件,从不使用 `shell=True`,从不使用 `splitlines()`。已删除文件、目录和不存在路径会被排除;结果去重并按工作区过滤。
-
-## 分批策略与部分失败语义
-
-文件按**每批 50 个顺序执行**(不并发 — 不能压垮 PyCharm 的分析进程)。对外仍表现为一次 MCP 调用。
-
-- 所有批次的 findings 会被合并。
-- 某批次失败(超时、5xx、非 JSON 等)时,保留已成功的结果并返回 `partialSuccess: true`,同时在 `batchErrors` 与按文件的 `failedFiles` 中说明失败原因。
-- 空 findings **不等于**分析成功 — 分析干净无问题的文件会被报告为 `status: "analyzed"`、`findingCount: 0`,与"未索引"明确区分。
-
-结果结构包含 `requestedFileCount`、`analyzedFileCount`、`skippedFileCount`、`failedFileCount`、`findingCount`、`severityCounts`、`fileSummaries`、`findings`、`durationMs`。Git 分析还会附加 `projectRoot`、`baseRef`、`changedFileCount`。
+- **`*_analyze_files`**:1–200 个绝对路径,自动去重 + 稳定排序。
+- **`*_analyze_git_changes`**:用 `git diff -z` / `git ls-files -z --others`
+  收集变更(staged/unstaged/untracked,相对 `base_ref`),排除已删除文件、
+  目录、不存在路径、工作区外路径。
+- Git 调用一律使用参数数组(`shell=False`)、NUL 分隔、UTF-8 解码,正确处理
+  空格、CJK、制表符与特殊字符。
 
 ## 工作区安全与多项目限制
 
-服务只分析允许工作区内的文件。工作区根目录来源于:
+- 路径必须在工作区根内(MCP Roots 或 `SONAR_WORKSPACE_ROOTS`)。
+- 解析符号链接 / Windows junction 后检测逃逸。
+- 跨平台路径规范化:Windows 盘符大小写、UNC、长路径;macOS 大小写敏感/不敏感 APFS。
+- 单次调用所有文件必须归属同一项目根,否则返回 `MULTIPLE_PROJECT_ROOTS`。
 
-1. **MCP 客户端 Roots**(首选),或
-2. `SONAR_WORKSPACE_ROOTS` — 一个或多个绝对路径,使用操作系统路径分隔符(macOS 用 `:`,Windows 用 `;`)分隔。
+## Sonar 端口发现机制
 
-示例:
+SonarQube for IDE 内嵌 HTTP 服务绑定 `127.0.0.1`,端口范围 `64120`–`64130`。
+发现顺序:`SONAR_IDE_PORT` → project→port 内存缓存 → 端口扫描 + 文件探针匹配 →
+缓存失效重试一次。
 
-```bash
-# macOS
-export SONAR_WORKSPACE_ROOTS="/Users/me/project1:/Users/me/project2"
-# Windows (PowerShell)
-$env:SONAR_WORKSPACE_ROOTS = "C:\Project1;D:\Project2"
-```
+## localhost 与 127.0.0.1、HTTP 421 与 IPv6
 
-如果两者都不可用,分析会被拒绝并返回 `WORKSPACE_NOT_CONFIGURED`。
+Sonar 校验 HTTP `Host`/`authority`:`127.0.0.1:<port>` 会返回 HTTP 421
+Misdirected Request,只接受 `localhost`。但某些系统上 `localhost` 会先解析为
+`::1`(IPv6),而 IDE 只监听 IPv4。本项目用自定义 httpx transport:TCP 连到
+`127.0.0.1`,同时保持 `Host: localhost` 头,完美解耦网络层与应用层权威。
 
-工作区归属检查基于**真实**解析路径,因此符号链接与 Windows Junction 逃逸工作区会被拒绝(`SYMLINK_ESCAPE`)。第一版要求同一调用中的所有文件属于同一个项目根目录。
+## 从旧版本升级(pycharm-sonar-mcp)
 
-**worktree 不一致:** 若 Codex/Claude 工作在与 PyCharm 打开的项目不同的 worktree 中,Sonar 会把文件报告为未索引。请在两者中打开同一个物理工作目录。
-
-## 代理干扰
-
-如果你的 shell 设置了 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`,这些变量对所有回环调用都会被**忽略**(`trust_env=False`)。`doctor` 在检测到代理变量时会输出告警,让你知道它们存在于环境中但未被使用。
-
----
+- GitHub 仓库已改名为 `pycharm-code-quality-mcp`,旧 URL 自动重定向。
+- 安装脚本会检测旧 `pycharm-sonar-mcp` 二进制与旧 MCP 配置 `pycharm-sonar`,
+  支持迁移到 `pycharm-code-quality`,不破坏其他 MCP 配置。
+- 旧命令 `pycharm-sonar-mcp`、旧 MCP 名 `pycharm-sonar`、旧包
+  `pycharm_sonar_mcp` 全部继续可用,转发到同一实现并输出迁移提示。
+- 旧环境变量 `SONAR_IDE_PORT` / `SONAR_WORKSPACE_ROOTS` /
+  `PYCHARM_SONAR_MCP_LOG_LEVEL` 继续生效。
 
 ## 推荐的 Agent 提示词
 
-把以下内容放入你的助手任务说明或提交信息检查清单:
+```
+完成代码修改后,调用 code_quality_analyze_git_changes。
 
-```text
-完成代码修改后,使用 PyCharm Sonar MCP 分析本次所有改动文件。
-修复能够安全处理的 CRITICAL 和 MAJOR 问题,然后重新分析。
-不要通过关闭规则、添加 noqa、排除文件或忽略注释来规避问题。
-如果仍有问题,报告规则编号、严重程度、文件和行号。
+默认使用 JetBrains inspections;如果检测到 SonarQube for IDE,则同时执行 Sonar。
+
+自动合并两个检查器报告的高置信度重复问题,但必须保留所有来源原始记录。
+
+优先修复 CRITICAL 和 MAJOR 问题,然后重新检查。
+
+不要通过关闭规则、添加 noqa、排除文件或忽略注释规避问题。
+
+最终报告:
+- 原始问题数
+- 去重后问题数
+- 合并重复数
+- JetBrains 问题数
+- Sonar 问题数
+- 剩余问题
+- 未修复原因
 ```
 
-你也可以在 `AGENTS.md` / `CLAUDE.md` 中加入 `## Sonar verification` 段落:
+## 安全模型
 
-```markdown
-## Sonar verification
-
-After modifying production source code:
-
-1. Analyze all changed source files with the PyCharm Sonar MCP.
-2. Fix CRITICAL and MAJOR findings when the fix is safe.
-3. Re-run analysis after fixes.
-4. Do not suppress, disable or exclude rules merely to pass analysis.
-5. Report all remaining findings with rule key, severity, file and line.
-6. Do not claim that Sonar passed unless the MCP tool was actually called.
-```
-
----
+- JetBrains URL 仅允许 loopback(`localhost` / `127.0.0.1` / `::1`)。
+- Sonar 仅连接 `127.0.0.1`。
+- 不上传代码、不保存源代码、不记录源码。
+- 不代理任意 JetBrains 工具(白名单只有 `get_project_status` /
+  `get_file_problems`),绝不开启 brave mode。
+- 不执行 shell、不修改文件、不修改 PyCharm 设置、不修改 Sonar 规则、
+  不自动添加 noqa、不自动忽略规则。
+- 配置 header 不写日志。
+- 去重读取的代码上下文:仅限已验证的允许文件、最多 3 行、只计算 hash、立即释放、不输出。
+- 文件仍限制在 MCP Roots 或允许工作区内。
 
 ## 本地开发
 
-需要 [uv](https://docs.astral.sh/uv/)。
-
 ```bash
+git clone https://github.com/yingsf/pycharm-code-quality-mcp.git
+cd pycharm-code-quality-mcp
 uv sync
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy src
 uv run pytest
-uv run pycharm-sonar-mcp doctor
-uv run pycharm-sonar-mcp serve
 ```
 
-本地构建独立二进制:
+架构(`src/pycharm_code_quality_mcp/`):
 
-```bash
-uv pip install pyinstaller
-uv run pyinstaller --noconfirm --clean pyinstaller/pycharm-sonar-mcp.spec
 ```
-
-`.github/workflows/test.yml` 中的 CI 会跑完整矩阵(Ubuntu/macOS/Windows × Python 3.11–3.13),外加 ShellCheck/PowerShell 语法检查,以及每个平台的 PyInstaller 构建 + 冒烟测试。
+cli.py            setup / jetbrains / sonar / doctor / serve
+server.py         注册 11 个工具 + stdio(瘦入口)
+doctor.py         三段诊断
+core/             workspace / path_utils / git_changes / file_context
+backends/
+  base.py         AnalysisBackend 抽象基类
+  jetbrains/      client / config / parser / analyzer / models
+  sonar/          client / discovery / transport / analyzer / models / result_summary
+quality/
+  models.py       UnifiedFinding / SourceFinding / QualityAnalysisResult / ...
+  orchestrator.py 并行编排 + 合并 + 去重
+  severity.py     6 级归一化
+  categorization.py 18 个稳定 category
+  normalization.py 路径 / 范围 / 消息规范化
+  deduplication.py 6 维评分 + complete-link 聚类
+  fingerprints.py 稳定 SHA-256 id
+tools/
+  _shared.py      workspace/roots/校验 helper
+  sonar_tools.py  4 个旧 sonar_* 工具
+  jetbrains_tools.py 3 个 jetbrains_* 工具
+  quality_tools.py 4 个 code_quality_* 工具(默认推荐)
+```
 
 ## 已知限制
 
-- **PyCharm 必须运行**,且项目已打开;SonarQube for IDE 必须已安装。
-- Sonar 后端必须已启动(先在 PyCharm 中打开过一个源文件)。
-- 文件必须已被当前 IDE 实例**索引**。
-- Codex/Claude 与 PyCharm 必须操作**同一个物理工作目录**。
-- **第一版:** 一次 `sonar_analyze_files` 调用只支持单一项目根目录(请分别分析每个项目)。
-- 本工具**不提供** SonarQube Server 的 Quality Gate、历史趋势或覆盖率管理功能。
-- **平台状态:** macOS(arm64、x64)与 Windows 11 x64 是第一版正式发布目标,并在 CI 中实际执行。Linux 源码级兼容(Ubuntu CI 跑通测试),但不发布预编译二进制。任何未在此列出的平台均为 **Experimental**。
+- 单次调用所有文件必须归属同一项目根。
+- JetBrains inspection 一次只接收一个文件;本工具在一个 MCP session 内顺序调用,
+  默认不并发(`JETBRAINS_MAX_CONCURRENCY=1`)。
+- 去重是确定性启发式,不是语义级;中置信度对子会进入 `possibleDuplicateGroups`
+  等待人工确认,不会自动合并。
+- macOS 与 Windows 对等支持;Linux 未官方打包(可从源码运行)。
+
+## License
+
+MIT —— 见 [LICENSE](LICENSE)。

@@ -495,21 +495,40 @@ def _auto_merge_conditions(
 ) -> tuple[bool, str | None]:
     """4 个自动合并条件(A/B/C/D),满足任一即合并
 
-    A:消息几乎完全相等(messageScore >= 0.95)且 locationScore >= 0.5
-    B:规则等价(ruleEquivalenceScore == 1.0)且 locationScore >= 0.5
-    C:anchor 相同(anchorScore == 1.0)且 messageScore >= 0.6
-    D:综合得分 >= threshold(各模式不同)
+    严格对应 spec 第 9.6 节:
+      A:同一文件 + 范围相交 + 规范化消息完全相同(messageScore == 1.0 且 locationScore > 0)
+      B:同一文件 + 显式规则等价 + 起始行距离 <= 2 + messageScore >= 0.55
+      C:同一文件 + codeAnchorHash 相同 + category 相同 + messageScore >= 0.82
+      D:综合得分 >= threshold(各模式不同)且至少两个强信号成立
 
     Returns:
         (是否合并, 命中条件名)
     """
-    if s.message >= 0.95 and s.location >= 0.5:
+    same_file = bool(a.file_norm) and a.file_norm == b.file_norm
+    line_dist = abs(a.start_line - b.start_line) if a.start_line and b.start_line else 0
+    ranges_overlap = bool(
+        a.range_tuple is not None
+        and b.range_tuple is not None
+        and _ranges_overlap(a.range_tuple, b.range_tuple)
+    )
+
+    # A:消息完全相同 + 范围相交(同文件)。
+    if same_file and ranges_overlap and s.message >= 0.95:
         return True, "A"
-    if s.rule >= 1.0 and s.location >= 0.5:
+    # B:规则等价 + 起始行距离 <= 2 + 消息相似度 >= 0.55。
+    if same_file and s.rule >= 1.0 and line_dist <= 2 and s.message >= 0.55:
         return True, "B"
-    if s.anchor >= 1.0 and s.message >= 0.6:
+    # C:anchor 相同 + category 相同 + 消息相似度 >= 0.82。
+    if same_file and s.anchor >= 1.0 and a.category == b.category and s.message >= 0.82:
         return True, "C"
-    if s.total >= threshold:
+    # D:综合得分 >= threshold + 至少两个强信号成立。
+    strong_signals = (
+        ranges_overlap,
+        s.rule >= 1.0,
+        s.anchor >= 1.0,
+        (a.category == b.category and s.message >= 0.80),
+    )
+    if s.total >= threshold and sum(1 for x in strong_signals if x) >= 2:
         return True, "D"
     return False, None
 
@@ -789,6 +808,10 @@ def deduplicate(
         group = [derived[i] for i in gidxs]
         result.findings.append(_build_unified(group))
 
+    # 稳定排序:确保相同输入(无论原始顺序)得到相同输出序列。
+    # 排序键:规范化文件路径 + 起始行 + 起始列 + id。
+    result.findings.sort(key=_finding_sort_key)
+
     # 可能重复组(中置信度,未合并)。
     result.possible_duplicate_groups = _build_possible_groups(all_possible, derived)
 
@@ -852,6 +875,18 @@ def _brief(d: _Derived, all_derived: list[_Derived]) -> dict[str, Any]:
         "filePath": f.file_path,
         "range": list(rt) if rt is not None else None,
     }
+
+
+def _finding_sort_key(f: UnifiedFinding) -> tuple[str, int, int, str]:
+    """UnifiedFinding 的稳定排序键
+
+    保证相同输入无论原始顺序如何,输出序列都完全一致。
+    排序优先级:规范化文件路径 → 起始行 → 起始列 → id。
+    """
+    r = f.range
+    sl = r.start_line if r is not None else 0
+    sc = r.start_column if r is not None else 0
+    return (normalization.normalize_file_path(f.file_path), sl, sc, f.id)
 
 
 __all__ = ["DeduplicationMode", "DeduplicationResult", "deduplicate"]

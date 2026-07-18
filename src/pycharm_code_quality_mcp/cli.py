@@ -1,15 +1,26 @@
-"""命令行接口:serve / doctor / --version
+"""命令行接口:serve / doctor / setup / jetbrains / sonar / --version
 
-`serve` 模式下 stdout 专用于 MCP JSON-RPC;`doctor` 与 `--version` 不是 MCP 服务,
+`serve` 模式下 stdout 专用于 MCP JSON-RPC;其余子命令不是 MCP 服务,
 其人类可读输出去往 stdout,诊断与错误输出去往 stderr。
+
+子命令总览:
+  (默认)             等价于 serve
+  serve              运行 stdio MCP 服务
+  doctor             运行环境诊断(不启动 MCP)
+  setup              引导式配置向导(JetBrains HTTP Stream)
+  jetbrains          JetBrains MCP 子命令组(configure / status / clear)
+  sonar              SonarQube for IDE 子命令组(status)
+  --version          打印版本并退出
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import multiprocessing
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from . import __version__
 from .doctor import run_doctor
@@ -24,7 +35,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pycharm-code-quality-mcp",
         description=(
-            "Local MCP bridge to PyCharm's SonarQube for IDE. "
+            "Local MCP bridge to PyCharm code quality. Default backend is JetBrains "
+            "inspections; SonarQube for IDE is an auto-detected optional enhancement. "
             "With no subcommand, runs the stdio MCP server."
         ),
         add_help=True,
@@ -47,6 +59,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional absolute file path to probe indexing for.",
     )
     doctor_p.set_defaults(func=_cmd_doctor)
+
+    # setup:非交互向导,引导用户配置 JetBrains MCP HTTP Stream。
+    setup_p = sub.add_parser("setup", help="Guided first-time setup (non-interactive).")
+    setup_p.add_argument(
+        "--json",
+        dest="json_input",
+        default=None,
+        help="Paste the full JetBrains 'Copy HTTP Stream Config' JSON to save and verify.",
+    )
+    setup_p.set_defaults(func=_cmd_setup)
+
+    # jetbrains 子命令组。
+    jb = sub.add_parser("jetbrains", help="Manage the JetBrains MCP backend.")
+    jb_sub = jb.add_subparsers(dest="jetbrains_command")
+    jb_cfg = jb_sub.add_parser("configure", help="Configure JetBrains MCP (interactive).")
+    jb_cfg.add_argument(
+        "--json",
+        dest="json_input",
+        default=None,
+        help="JetBrains 'Copy HTTP Stream Config' JSON. If omitted, reads from stdin.",
+    )
+    jb_cfg.set_defaults(func=_cmd_jetbrains_configure)
+    jb_status = jb_sub.add_parser("status", help="Show JetBrains MCP status.")
+    jb_status.set_defaults(func=_cmd_jetbrains_status)
+    jb_clear = jb_sub.add_parser("clear", help="Remove stored JetBrains MCP config.")
+    jb_clear.set_defaults(func=_cmd_jetbrains_clear)
+
+    # sonar 子命令组。
+    sn = sub.add_parser("sonar", help="Inspect the SonarQube for IDE backend.")
+    sn_sub = sn.add_subparsers(dest="sonar_command")
+    sn_status = sn_sub.add_parser("status", help="Show SonarQube for IDE status (port scan).")
+    sn_status.set_defaults(func=_cmd_sonar_status)
 
     return parser
 
@@ -77,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
     return func(args)
 
 
+# ---------------------------------------------------------------------------
+# serve / doctor
+# ---------------------------------------------------------------------------
+
+
 def _cmd_serve(_args: argparse.Namespace) -> int:
     try:
         run_stdio()
@@ -95,5 +144,256 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return run_doctor(file_path=file_arg, stream=sys.stdout)
 
 
+# ---------------------------------------------------------------------------
+# setup
+# ---------------------------------------------------------------------------
+
+
+def _cmd_setup(args: argparse.Namespace) -> int:
+    """非交互式首次配置向导
+
+    若通过 --json 提供 JetBrains 配置,则保存并校验;否则输出后续步骤说明
+    (绝不卡住等待 stdin,以满足非交互安装场景)。
+    """
+    json_input: str | None = getattr(args, "json_input", None)
+    print("PyCharm Code Quality MCP — setup")
+    print("")
+    print("This tool defaults to JetBrains inspections. To enable the JetBrains MCP backend:")
+    print("  1. Open PyCharm → Settings → Tools → MCP Server.")
+    print("  2. Enable MCP Server.")
+    print("  3. In 'Exposed Tools', enable: get_project_status, get_file_problems.")
+    print("  4. Click 'Copy HTTP Stream Config'.")
+    print("  5. Run: pycharm-code-quality-mcp jetbrains configure --json '<paste config>'")
+    print("")
+    print("SonarQube for IDE is auto-detected; no configuration is needed for it.")
+    print("If you do not install Sonar, the JetBrains backend still works on its own.")
+    print("")
+
+    if json_input:
+        return _save_jetbrains_config(json_input)
+
+    print("No --json provided. Run 'pycharm-code-quality-mcp jetbrains configure' next.")
+    print("Run 'pycharm-code-quality-mcp doctor' to verify everything.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# jetbrains 子命令
+# ---------------------------------------------------------------------------
+
+
+def _cmd_jetbrains_configure(args: argparse.Namespace) -> int:
+    """交互/非交互配置 JetBrains MCP,接收完整 JSON 并校验必需工具"""
+    json_input: str | None = getattr(args, "json_input", None)
+    if not json_input:  # noqa: SIM102 - 内外两层 if 语义不同,不合并
+        # 从 stdin 读取(允许管道传入)。
+        if not sys.stdin.isatty():
+            json_input = sys.stdin.read().strip()
+    if not json_input:
+        print("error: no JSON provided. Use --json or pipe the config via stdin.", file=sys.stderr)
+        print(
+            "In PyCharm: Settings → Tools → MCP Server → Copy HTTP Stream Config, then:",
+            file=sys.stderr,
+        )
+        print(
+            "  pycharm-code-quality-mcp jetbrains configure --json '<paste>'",
+            file=sys.stderr,
+        )
+        return 2
+    return _save_jetbrains_config(json_input)
+
+
+def _save_jetbrains_config(json_input: str) -> int:
+    """解析并保存 JetBrains 配置;通过真实 MCP 连接校验必需工具"""
+    from .backends.jetbrains import config as jb_config
+
+    parsed = _parse_jetbrains_stream_json(json_input)
+    if parsed is None:
+        print("error: could not extract url/headers from the provided JSON.", file=sys.stderr)
+        return 2
+
+    url, headers = parsed
+    try:
+        jb_config.save_config(url, headers)
+    except Exception as e:
+        print(f"error: failed to save config: {e}", file=sys.stderr)
+        return 2
+
+    print(f"Saved JetBrains MCP config to {jb_config.config_file_path()}")
+    print("Verifying connection (initialize + tools/list)…")
+
+    # 真实连接校验:initialize + tools/list + 必需工具存在。
+    import asyncio
+
+    from .backends.jetbrains.analyzer import JetBrainsAnalysisBackend
+    from .backends.jetbrains.client import REQUIRED_TOOLS
+
+    async def _verify() -> tuple[bool, str]:
+        try:
+            backend = JetBrainsAnalysisBackend()
+            status = await backend.get_status()
+            if not status.get("available"):
+                return False, str(status.get("error") or "connection failed")
+            tools = status.get("tools") or []
+            missing = sorted(REQUIRED_TOOLS - set(tools))
+            if missing:
+                return False, f"missing required tools: {missing}. Enable them in Exposed Tools."
+            return True, "ok"
+        except Exception as e:  # pragma: no cover - defensive
+            return False, str(e)
+
+    ok, detail = asyncio.run(_verify())
+    if ok:
+        print("[OK] JetBrains MCP configured and reachable.")
+        print("Run 'pycharm-code-quality-mcp doctor' to confirm.")
+        return 0
+    print(f"[FAIL] Configuration saved, but verification failed: {detail}", file=sys.stderr)
+    print(
+        "The config file is saved; re-open PyCharm's MCP Server settings and retry.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _parse_jetbrains_stream_json(raw: str) -> tuple[str, dict[str, str]] | None:
+    """从 JetBrains 'Copy HTTP Stream Config' 的 JSON 中抽取 url 与 headers
+
+    接受多种形态:
+      * {"url": "...", "headers": {...}}
+      * {"transport": {"type": "streamable-http", "url": "...", "headers": {...}}}
+      * {"mcpServers": {"<name>": {"url": "...", "headers": {...}}}}
+      * {"type": "streamable-http", "url": "...", "headers": {...}}
+    """
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+
+    candidates: list[dict[str, object]] = []
+    if "url" in obj:
+        candidates.append(obj)
+    if isinstance(obj.get("transport"), dict):
+        candidates.append(obj["transport"])
+    if isinstance(obj.get("mcpServers"), dict):
+        for v in obj["mcpServers"].values():
+            if isinstance(v, dict):
+                candidates.append(v)
+
+    for cand in candidates:
+        url = cand.get("url") or cand.get("endpoint")
+        if isinstance(url, str) and url.strip():
+            headers = cand.get("headers")
+            hdr_dict: dict[str, str] = {}
+            if isinstance(headers, dict):
+                hdr_dict = {str(k): str(v) for k, v in headers.items()}
+            return url.strip(), hdr_dict
+    return None
+
+
+def _cmd_jetbrains_status(_args: argparse.Namespace) -> int:
+    """打印 JetBrains MCP 当前配置与连接状态"""
+    import asyncio
+
+    from .backends.jetbrains import config as jb_config
+
+    cfg = jb_config.load_config()
+    if cfg is None:
+        print("JetBrains MCP: not configured.")
+        print(f"Config file (would be): {jb_config.config_file_path()}")
+        print("Run: pycharm-code-quality-mcp jetbrains configure")
+        return 1
+    print(f"Config file: {jb_config.config_file_path()}")
+    print(f"URL: {cfg.url}")
+    print(f"Transport: {cfg.transport}")
+    print(f"Headers: {_redact_headers(cfg.headers)}")
+
+    from .backends.jetbrains.analyzer import JetBrainsAnalysisBackend
+
+    async def _probe() -> dict[str, Any]:
+        try:
+            backend = JetBrainsAnalysisBackend()
+            return await backend.get_status()
+        except Exception as e:  # pragma: no cover - defensive
+            return {"available": False, "error": str(e)}
+
+    status = asyncio.run(_probe())
+    print("")
+    print(f"Available:    {status.get('available')}")
+    print(f"Project ready: {status.get('projectReady')}")
+    print(f"Indexing:      {status.get('indexing')}")
+    tools = status.get("tools") or []
+    if tools:
+        print(f"Tools:         {', '.join(tools)}")
+    err = status.get("error")
+    if err:
+        print(f"Error:         {err}", file=sys.stderr)
+        return 1
+    return 0 if status.get("available") else 1
+
+
+def _cmd_jetbrains_clear(_args: argparse.Namespace) -> int:
+    """删除已保存的 JetBrains 配置"""
+    from .backends.jetbrains import config as jb_config
+
+    removed = jb_config.clear_config()
+    path = jb_config.config_file_path()
+    if removed:
+        print(f"Removed JetBrains MCP config at {path}")
+        return 0
+    print(f"No config file at {path} (nothing to clear).")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# sonar 子命令
+# ---------------------------------------------------------------------------
+
+
+def _cmd_sonar_status(_args: argparse.Namespace) -> int:
+    """扫描 SonarQube for IDE 实例并打印状态"""
+    import asyncio
+
+    from .backends.sonar.client import SonarClient
+    from .backends.sonar.discovery import PORT_MAX, PORT_MIN, IdeDiscovery
+
+    sonar = SonarClient()
+    try:
+        discovery = IdeDiscovery(sonar)
+        instances = asyncio.run(asyncio.to_thread(discovery.discover_all_instances))
+    finally:
+        sonar.close()
+
+    if not instances:
+        print(f"SonarQube for IDE: no instance found on ports {PORT_MIN}..{PORT_MAX}.")
+        print("Open PyCharm with the plugin installed.")
+        return 1
+    print(f"SonarQube for IDE: {len(instances)} instance(s) found")
+    for inst in instances:
+        ide = inst.status.get("ideName") or inst.status.get("ide") or "<unknown>"
+        print(f"  port {inst.port}: {ide}")
+    if len(instances) > 1:
+        print("")
+        print("Multiple instances detected; consider setting SONAR_IDE_PORT to pick one.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# 辅助
+# ---------------------------------------------------------------------------
+
+
+def _redact_headers(headers: dict[str, str]) -> str:
+    """打印 headers 时只显示 key,不输出 value(可能含鉴权)"""
+    if not headers:
+        return "{}"
+    keys = ", ".join(sorted(headers.keys()))
+    return f"<{len(headers)} key(s): {keys}>"
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+_ = Sequence  # 保留 Sequence 在模块命名空间(部分旧导入可能用到)
