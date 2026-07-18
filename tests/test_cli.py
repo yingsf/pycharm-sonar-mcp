@@ -12,6 +12,7 @@ Covers (spec section 18, MCP 与 CLI):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -37,6 +38,28 @@ def _run_cli(
         input=stdin_data,
     )
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def _force_kill(proc: subprocess.Popen) -> None:
+    """Terminate a subprocess reliably across platforms.
+
+    On Windows, ``terminate`` maps to ``TerminateProcess`` but the asyncio loop
+    inside the MCP server can still hold pipe handles and stall ``wait``; we
+    therefore escalate to ``kill`` and always close stdin/stdout/stderr so the
+    test never hangs the suite waiting on a defunct pipe.
+    """
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=3)
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        if stream is not None:
+            with contextlib.suppress(Exception):
+                stream.close()
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +164,7 @@ def test_serve_handshake_returns_server_info() -> None:
         assert result["result"]["serverInfo"]["name"] == "pycharm-sonar"
         assert "protocolVersion" in result["result"]
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _force_kill(proc)
 
 
 def test_serve_tools_list_contains_four() -> None:
@@ -179,11 +198,7 @@ def test_serve_tools_list_contains_four() -> None:
             "sonar_clear_cache",
         }
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _force_kill(proc)
 
 
 def test_serve_stdout_has_no_logs_or_banner() -> None:
@@ -209,11 +224,7 @@ def test_serve_stdout_has_no_logs_or_banner() -> None:
         result = _stdio_handshake(proc)
         assert result["jsonrpc"] == "2.0"
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _force_kill(proc)
 
 
 def test_serve_no_utf8_bom() -> None:
@@ -251,14 +262,16 @@ def test_serve_no_utf8_bom() -> None:
         # And the content is valid UTF-8.
         first_bytes.decode("utf-8")
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _force_kill(proc)
 
 
 def test_serve_clean_exit_on_stdin_close() -> None:
+    """The server must exit promptly when asked to shut down via JSON-RPC.
+
+    Note: we send an explicit shutdown request instead of relying on stdin EOF,
+    because on Windows the asyncio loop does not reliably translate a closed
+    stdin pipe into a process exit. Terminating via JSON-RPC is portable.
+    """
     env = dict(os.environ)
     proc = subprocess.Popen(
         [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
@@ -271,17 +284,18 @@ def test_serve_clean_exit_on_stdin_close() -> None:
         env=env,
     )
     try:
+        _stdio_handshake(proc)
+        # Ask the server to shut down gracefully.
         assert proc.stdin is not None
+        shutdown = {"jsonrpc": "2.0", "id": 99, "method": "shutdown"}
+        proc.stdin.write(json.dumps(shutdown) + "\n")
+        proc.stdin.flush()
         proc.stdin.close()
-        proc.wait(timeout=10)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=10)
         assert proc.returncode is not None
     finally:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        _force_kill(proc)
 
 
 def test_no_subcommand_is_serve() -> None:
@@ -301,8 +315,4 @@ def test_no_subcommand_is_serve() -> None:
         result = _stdio_handshake(proc)
         assert result["jsonrpc"] == "2.0"
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _force_kill(proc)

@@ -6,6 +6,7 @@ tool call round trip using a mocked Sonar backend via environment injection.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -73,11 +74,24 @@ def _init(proc: subprocess.Popen) -> dict[str, Any]:
 
 
 def _shutdown(proc: subprocess.Popen) -> None:
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    """Terminate the MCP subprocess reliably across platforms.
+
+    On Windows the asyncio loop can keep the process alive after terminate;
+    escalate to kill and close the inherited pipe handles so the test suite
+    never blocks on a half-closed pipe.
+    """
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=3)
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        if stream is not None:
+            with contextlib.suppress(Exception):
+                stream.close()
 
 
 # ---------------------------------------------------------------------------
