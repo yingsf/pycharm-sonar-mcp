@@ -26,6 +26,7 @@ def _run_cli(
 ) -> tuple[int, str, str]:
     """Run the CLI via `python -m pycharm_sonar_mcp` in a subprocess."""
     env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.run(
         [sys.executable, "-m", "pycharm_sonar_mcp", *args],
@@ -145,6 +146,7 @@ def _stdio_handshake(proc: subprocess.Popen, *, init_id: int = 1) -> dict:
 
 def test_serve_handshake_returns_server_info() -> None:
     env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.Popen(
         [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
@@ -169,6 +171,7 @@ def test_serve_handshake_returns_server_info() -> None:
 
 def test_serve_tools_list_contains_four() -> None:
     env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
         stdin=subprocess.PIPE,
@@ -204,6 +207,7 @@ def test_serve_tools_list_contains_four() -> None:
 def test_serve_stdout_has_no_logs_or_banner() -> None:
     """Before any request, stdout must be empty. After initialize, only JSON-RPC."""
     env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
         stdin=subprocess.PIPE,
@@ -229,6 +233,7 @@ def test_serve_stdout_has_no_logs_or_banner() -> None:
 
 def test_serve_no_utf8_bom() -> None:
     env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
         stdin=subprocess.PIPE,
@@ -273,6 +278,7 @@ def test_serve_clean_exit_on_stdin_close() -> None:
     stdin pipe into a process exit. Terminating via JSON-RPC is portable.
     """
     env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
         stdin=subprocess.PIPE,
@@ -303,6 +309,7 @@ def test_serve_clean_exit_on_stdin_close() -> None:
 def test_no_subcommand_is_serve() -> None:
     """No args should behave like serve — respond to initialize."""
     env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "pycharm_sonar_mcp"],
         stdin=subprocess.PIPE,

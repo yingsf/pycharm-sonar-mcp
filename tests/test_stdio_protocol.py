@@ -28,6 +28,9 @@ _LINES: dict[subprocess.Popen, queue.Queue[str | None]] = {}
 def _spawn(env_overrides: dict[str, str] | None = None) -> subprocess.Popen:
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
+    # Force unbuffered child stdio so the pump thread sees each JSON-RPC line at once.
+    # Without this, Windows buffers the child's stdout and the test deadlines fire.
+    env["PYTHONUNBUFFERED"] = "1"
     if env_overrides:
         env.update(env_overrides)
     proc = subprocess.Popen(
