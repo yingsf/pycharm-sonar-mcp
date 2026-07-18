@@ -13,10 +13,10 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # Required builds: arm64 + Windows. The release job waits for these only.
+  build-required:
     name: build (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
       matrix:
@@ -24,19 +24,9 @@ jobs:
           - label: macos-arm64
             os: macos-14
             artifact_name: pycharm-sonar-mcp-macos-arm64
-            optional: false
-          # macos-13 (Intel) is heavily rate-limited for free accounts. It is marked
-          # optional so a queued/failed Intel build never blocks the release; the arm64
-          # and Windows binaries still ship. Re-running the workflow later, once Intel
-          # capacity frees up, produces the missing macos-x64 artifact.
-          - label: macos-x64
-            os: macos-13
-            artifact_name: pycharm-sonar-mcp-macos-x64
-            optional: true
           - label: windows-x64
             os: windows-latest
             artifact_name: pycharm-sonar-mcp-windows-x64.exe
-            optional: false
     steps:
       - uses: actions/checkout@v4
 
@@ -90,14 +80,53 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: pyinstaller/dist/${{ matrix.artifact_name }}
 
+  # Optional Intel build on macos-13. The free-tier Intel runner is heavily rate-limited,
+  # so this job frequently queues for a long time. It is intentionally NOT a dependency of
+  # the release job: arm64 + Windows ship regardless. When Intel capacity frees up and this
+  # job succeeds, re-run the release workflow to attach the Intel artifact.
+  build-macos-x64:
+    name: build (macos-x64, optional)
+    runs-on: macos-13
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync + add pyinstaller
+        run: |
+          uv sync --python 3.12
+          uv pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
+
+      - name: Rename binary
+        run: mv pyinstaller/dist/pycharm-sonar-mcp pyinstaller/dist/pycharm-sonar-mcp-macos-x64
+
+      - name: Smoke --version
+        run: pyinstaller/dist/pycharm-sonar-mcp-macos-x64 --version
+
+      - name: Smoke doctor
+        run: pyinstaller/dist/pycharm-sonar-mcp-macos-x64 doctor || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pycharm-sonar-mcp-macos-x64
+          path: pyinstaller/dist/pycharm-sonar-mcp-macos-x64
+
   release:
     name: publish release
-    # Run even if the optional macos-x64 build was skipped/failed, as long as the
-    # required builds (arm64 + windows) succeeded. The guard step below aborts the
-    # release when a required artifact is missing, so a failed required build still
-    # stops a broken release.
-    needs: build
-    if: always()
+    # Depends only on the required builds. The optional Intel build may still be queued
+    # or may have failed; that must not block publishing arm64 + Windows.
+    needs: build-required
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
