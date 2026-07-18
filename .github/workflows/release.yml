@@ -48,34 +48,32 @@ jobs:
       - name: Build with PyInstaller
         run: uv run pyinstaller --noconfirm --clean pyinstaller/pycharm-sonar-mcp.spec
 
-      - name: Rename binary (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mv pyinstaller/dist/pycharm-sonar-mcp pyinstaller/dist/${{ matrix.artifact_name }}
+      - name: Rename binary (POSIX)
+        if: runner.os != 'Windows'
+        run: mv pyinstaller/dist/pycharm-sonar-mcp pyinstaller/dist/${{ matrix.artifact_name }}
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
-        run: |
-          mv pyinstaller/dist/pycharm-sonar-mcp.exe pyinstaller/dist/${{ matrix.artifact_name }}
         shell: pwsh
+        run: Move-Item -Path pyinstaller\dist\pycharm-sonar-mcp.exe -Destination pyinstaller\dist\${{ matrix.artifact_name }} -Force
 
-      - name: Smoke: --version (POSIX)
+      - name: Smoke --version (POSIX)
         if: runner.os != 'Windows'
         run: pyinstaller/dist/${{ matrix.artifact_name }} --version
 
-      - name: Smoke: --version (Windows)
+      - name: Smoke --version (Windows)
         if: runner.os == 'Windows'
-        run: pyinstaller/dist/${{ matrix.artifact_name }} --version
         shell: pwsh
+        run: .\pyinstaller\dist\${{ matrix.artifact_name }} --version
 
-      - name: Smoke: doctor (POSIX)
+      - name: Smoke doctor (POSIX)
         if: runner.os != 'Windows'
         run: pyinstaller/dist/${{ matrix.artifact_name }} doctor || true
 
-      - name: Smoke: doctor (Windows)
+      - name: Smoke doctor (Windows)
         if: runner.os == 'Windows'
-        run: pyinstaller/dist/${{ matrix.artifact_name }} doctor
         shell: pwsh
+        run: .\pyinstaller\dist\${{ matrix.artifact_name }} doctor
         continue-on-error: true
 
       - name: Upload artifact

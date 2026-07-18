@@ -112,25 +112,51 @@ jobs:
       - name: Build with PyInstaller
         run: uv run pyinstaller --noconfirm --clean pyinstaller/pycharm-sonar-mcp.spec
 
-      - name: Smoke: --version
-        run: |
-          ./pyinstaller/dist/pycharm-sonar-mcp${{ runner.os == 'Windows' && '.exe' || '' }} --version
+      - name: Smoke --version (POSIX)
+        if: runner.os != 'Windows'
+        run: ./pyinstaller/dist/pycharm-sonar-mcp --version
 
-      - name: Smoke: doctor
-        run: |
-          ./pyinstaller/dist/pycharm-sonar-mcp${{ runner.os == 'Windows' && '.exe' || '' }} doctor || true
+      - name: Smoke --version (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\pyinstaller\dist\pycharm-sonar-mcp.exe --version
 
-      - name: Smoke: MCP stdio initialize handshake
+      - name: Smoke doctor (POSIX)
+        if: runner.os != 'Windows'
+        run: ./pyinstaller/dist/pycharm-sonar-mcp doctor || true
+
+      - name: Smoke doctor (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\pyinstaller\dist\pycharm-sonar-mcp.exe doctor
+        continue-on-error: true
+
+      - name: Smoke MCP stdio initialize handshake (POSIX)
+        if: runner.os != 'Windows'
+        run: |
+          resp=$(echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' | ./pyinstaller/dist/pycharm-sonar-mcp serve | head -1)
+          echo "Response: $resp"
+          echo "$resp" | grep -q '"serverInfo"' || { echo "initialize did not return serverInfo"; exit 1; }
+
+      - name: Smoke MCP stdio initialize handshake (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $exe = "./pyinstaller/dist/pycharm-sonar-mcp$(if ($IsWindows -or $env:OS -eq 'Windows_NT') {'.exe'} else {''})"
           $init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
-          $resp = $init | & $exe serve | Select-Object -First 1
+          $resp = $init | .\pyinstaller\dist\pycharm-sonar-mcp.exe serve | Select-Object -First 1
           Write-Host "Response: $resp"
           if ($resp -notmatch '"serverInfo"') { throw "initialize did not return serverInfo" }
 
-      - name: Upload binary artifact
+      - name: Upload binary artifact (POSIX)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: pyinstaller/dist/pycharm-sonar-mcp${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: pyinstaller/dist/pycharm-sonar-mcp
+
+      - name: Upload binary artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: pyinstaller/dist/pycharm-sonar-mcp.exe
