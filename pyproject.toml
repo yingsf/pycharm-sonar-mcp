@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pycharm-sonar-mcp"
+version = "0.1.0"
+description = "Local MCP server bridging Codex/Claude Code to PyCharm's SonarQube for IDE local HTTP API."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Yingshufeng" },
+]
+keywords = ["mcp", "sonar", "sonarqube", "pycharm", "codex", "claude", "ide"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "mcp>=1.2.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.7.0",
+    "anyio>=4.0.0",
+]
+
+[project.scripts]
+pycharm-sonar-mcp = "pycharm_sonar_mcp.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yingsf/pycharm-sonar-mcp"
+Repository = "https://github.com/yingsf/pycharm-sonar-mcp"
+Issues = "https://github.com/yingsf/pycharm-sonar-mcp/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pycharm_sonar_mcp"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # line length handled by formatter
+    "RUF001", # 中英文混排时允许全角标点(中文 docstring 需要)
+    "RUF002", # 同上:docstring 内的全角标点
+    "RUF003", # 同上:注释内的全角标点
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B017"] # allow pytest.raises(Exception) in tests
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+packages = ["pycharm_sonar_mcp"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra -q"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:mcp.*",
+    "ignore::DeprecationWarning:pydantic.*",
+    "ignore::ResourceWarning",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.0",
+    "pytest>=8.0",
+    "ruff>=0.15.22",
+]
