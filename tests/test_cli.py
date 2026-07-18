@@ -24,12 +24,12 @@ from pathlib import Path
 def _run_cli(
     args: list[str], *, timeout: float = 10.0, stdin_data: str | None = None
 ) -> tuple[int, str, str]:
-    """Run the CLI via `python -m pycharm_sonar_mcp` in a subprocess."""
+    """Run the CLI via `python -m pycharm_code_quality_mcp` in a subprocess."""
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.run(
-        [sys.executable, "-m", "pycharm_sonar_mcp", *args],
+        [sys.executable, "-m", "pycharm_code_quality_mcp", *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -73,13 +73,13 @@ def test_version_prints_single_line() -> None:
     assert rc == 0
     lines = [ln for ln in out.splitlines() if ln.strip()]
     assert len(lines) == 1
-    assert lines[0].startswith("pycharm-sonar-mcp ")
+    assert lines[0].startswith("pycharm-code-quality-mcp ")
     # No BOM.
     assert not out.startswith("\ufeff")
 
 
 def test_version_format() -> None:
-    from pycharm_sonar_mcp import __version__
+    from pycharm_code_quality_mcp import __version__
 
     _rc, out, _ = _run_cli(["--version"])
     assert __version__ in out
@@ -149,7 +149,7 @@ def test_serve_handshake_returns_server_info() -> None:
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
+        [sys.executable, "-m", "pycharm_code_quality_mcp", "serve"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -163,7 +163,7 @@ def test_serve_handshake_returns_server_info() -> None:
         assert result["jsonrpc"] == "2.0"
         assert result["id"] == 1
         assert "result" in result
-        assert result["result"]["serverInfo"]["name"] == "pycharm-sonar"
+        assert result["result"]["serverInfo"]["name"] == "pycharm-code-quality"
         assert "protocolVersion" in result["result"]
     finally:
         _force_kill(proc)
@@ -173,7 +173,7 @@ def test_serve_tools_list_contains_four() -> None:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
+        [sys.executable, "-m", "pycharm_code_quality_mcp", "serve"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -209,7 +209,7 @@ def test_serve_stdout_has_no_logs_or_banner() -> None:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
+        [sys.executable, "-m", "pycharm_code_quality_mcp", "serve"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -235,7 +235,7 @@ def test_serve_no_utf8_bom() -> None:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
+        [sys.executable, "-m", "pycharm_code_quality_mcp", "serve"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -280,7 +280,7 @@ def test_serve_clean_exit_on_stdin_close() -> None:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
+        [sys.executable, "-m", "pycharm_code_quality_mcp", "serve"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -311,7 +311,7 @@ def test_no_subcommand_is_serve() -> None:
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pycharm_sonar_mcp"],
+        [sys.executable, "-m", "pycharm_code_quality_mcp"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

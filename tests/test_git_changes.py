@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from pycharm_sonar_mcp import errors, git_changes
+from pycharm_code_quality_mcp import errors
+from pycharm_code_quality_mcp.core import git_changes
 
 
 def _git(args: list[str], *, cwd: str) -> None:

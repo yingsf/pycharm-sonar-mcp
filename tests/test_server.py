@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from pycharm_sonar_mcp import errors
-from pycharm_sonar_mcp.ide_discovery import IdeDiscovery
-from pycharm_sonar_mcp.server import (
+from pycharm_code_quality_mcp import errors
+from pycharm_code_quality_mcp.backends.sonar.client import SonarClient
+from pycharm_code_quality_mcp.backends.sonar.discovery import IdeDiscovery
+from pycharm_code_quality_mcp.server import (
     _impl_analyze_files,
     _impl_analyze_git_changes,
     _impl_clear_cache,
     _impl_ide_status,
     reset_singletons,
 )
-from pycharm_sonar_mcp.sonar_client import SonarClient
 
 # ---------------------------------------------------------------------------
 # Tool wiring / schema
@@ -25,7 +25,7 @@ from pycharm_sonar_mcp.sonar_client import SonarClient
 
 
 def test_app_registers_four_tools() -> None:
-    from pycharm_sonar_mcp.server import build_app
+    from pycharm_code_quality_mcp.server import build_app
 
     app = build_app()
 
@@ -40,7 +40,7 @@ def test_app_registers_four_tools() -> None:
 
 
 def test_tool_descriptions_nonempty() -> None:
-    from pycharm_sonar_mcp.server import build_app
+    from pycharm_code_quality_mcp.server import build_app
 
     app = build_app()
     tools = asyncio.run(app.list_tools())
@@ -49,7 +49,7 @@ def test_tool_descriptions_nonempty() -> None:
 
 
 def test_analyze_files_schema_has_required_inputs() -> None:
-    from pycharm_sonar_mcp.server import build_app
+    from pycharm_code_quality_mcp.server import build_app
 
     app = build_app()
     tools = asyncio.run(app.list_tools())
@@ -303,7 +303,7 @@ def test_analyze_files_empty_findings_marked_analyzed(mock_sonar_factory, worksp
 
 
 def test_clear_cache_all(mock_sonar_factory, workspace: Path) -> None:
-    from pycharm_sonar_mcp.ide_discovery import get_global_cache
+    from pycharm_code_quality_mcp.backends.sonar.discovery import get_global_cache
 
     client, _r = mock_sonar_factory(ports=[64120])
     _wire_server(client, roots=[str(workspace)])
@@ -315,7 +315,7 @@ def test_clear_cache_all(mock_sonar_factory, workspace: Path) -> None:
 
 
 def test_clear_cache_single(mock_sonar_factory, workspace: Path) -> None:
-    from pycharm_sonar_mcp.ide_discovery import get_global_cache
+    from pycharm_code_quality_mcp.backends.sonar.discovery import get_global_cache
 
     client, _r = mock_sonar_factory(ports=[64120])
     _wire_server(client, roots=[str(workspace)])

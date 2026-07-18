@@ -45,7 +45,7 @@ def _spawn(env_overrides: dict[str, str] | None = None) -> subprocess.Popen:
     if env_overrides:
         env.update(env_overrides)
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
+        [sys.executable, "-m", "pycharm_code_quality_mcp", "serve"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -162,7 +162,7 @@ def test_initialize_protocol_version_present() -> None:
     try:
         resp = _init(proc)
         assert resp["result"]["protocolVersion"]
-        assert resp["result"]["serverInfo"]["name"] == "pycharm-sonar"
+        assert resp["result"]["serverInfo"]["name"] == "pycharm-code-quality"
     finally:
         _shutdown(proc)
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import multiprocessing
 import sys
 
-from pycharm_sonar_mcp.cli import main
+from pycharm_code_quality_mcp.cli import main
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()

@@ -19,9 +19,9 @@ from typing import Any
 import httpx
 import pytest
 
-from pycharm_sonar_mcp import errors
-from pycharm_sonar_mcp.ide_discovery import validate_status_response
-from pycharm_sonar_mcp.local_transport import (
+from pycharm_code_quality_mcp import errors
+from pycharm_code_quality_mcp.backends.sonar.discovery import validate_status_response
+from pycharm_code_quality_mcp.backends.sonar.transport import (
     LOOPBACK_IPV4,
     build_local_client,
 )

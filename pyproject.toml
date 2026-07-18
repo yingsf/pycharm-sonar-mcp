@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pycharm-sonar-mcp"
-version = "0.1.0"
-description = "Local MCP server bridging Codex/Claude Code to PyCharm's SonarQube for IDE local HTTP API."
+name = "pycharm-code-quality-mcp"
+version = "1.0.0"
+description = "Local MCP server bridging Codex/Claude Code to PyCharm's JetBrains MCP inspections and SonarQube for IDE."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -13,9 +13,9 @@ license-files = ["LICENSE"]
 authors = [
     { name = "Yingshufeng" },
 ]
-keywords = ["mcp", "sonar", "sonarqube", "pycharm", "codex", "claude", "ide"]
+keywords = ["mcp", "jetbrains", "pycharm", "sonar", "sonarqube", "code-quality", "codex", "claude", "ide"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
@@ -30,18 +30,22 @@ dependencies = [
     "httpx>=0.27.0",
     "pydantic>=2.7.0",
     "anyio>=4.0.0",
+    "platformdirs>=4.0.0",
 ]
 
 [project.scripts]
+# 新主命令
+pycharm-code-quality-mcp = "pycharm_code_quality_mcp.cli:main"
+# 旧命令兼容入口(转发到同一实现)
 pycharm-sonar-mcp = "pycharm_sonar_mcp.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yingsf/pycharm-sonar-mcp"
-Repository = "https://github.com/yingsf/pycharm-sonar-mcp"
-Issues = "https://github.com/yingsf/pycharm-sonar-mcp/issues"
+Homepage = "https://github.com/yingsf/pycharm-code-quality-mcp"
+Repository = "https://github.com/yingsf/pycharm-code-quality-mcp"
+Issues = "https://github.com/yingsf/pycharm-code-quality-mcp/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pycharm_sonar_mcp"]
+packages = ["src/pycharm_code_quality_mcp", "src/pycharm_sonar_mcp"]
 
 [tool.ruff]
 target-version = "py311"
@@ -69,6 +73,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B017"] # allow pytest.raises(Exception) in tests
+"src/pycharm_sonar_mcp/*" = ["F401", "F403"] # 兼容层 re-export
 
 [tool.ruff.format]
 quote-style = "double"
@@ -80,7 +85,11 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
-packages = ["pycharm_sonar_mcp"]
+packages = ["pycharm_code_quality_mcp"]
+
+[[tool.mypy.overrides]]
+module = "pycharm_sonar_mcp.*"
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -95,6 +104,7 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning:mcp.*",
     "ignore::DeprecationWarning:pydantic.*",
+    "ignore::DeprecationWarning:pycharm_sonar_mcp.*",
     "ignore::ResourceWarning",
 ]
 

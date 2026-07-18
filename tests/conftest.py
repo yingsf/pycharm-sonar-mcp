@@ -14,9 +14,9 @@ from typing import Any
 import httpx
 import pytest
 
-from pycharm_sonar_mcp.ide_discovery import PortCache, set_global_cache
-from pycharm_sonar_mcp.server import reset_singletons
-from pycharm_sonar_mcp.sonar_client import SonarClient
+from pycharm_code_quality_mcp.backends.sonar.client import SonarClient
+from pycharm_code_quality_mcp.backends.sonar.discovery import PortCache, set_global_cache
+from pycharm_code_quality_mcp.server import reset_singletons
 
 
 class MockTransport(httpx.BaseTransport):

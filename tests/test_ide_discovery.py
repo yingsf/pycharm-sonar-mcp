@@ -7,8 +7,9 @@ from typing import Any
 import httpx
 import pytest
 
-from pycharm_sonar_mcp import errors
-from pycharm_sonar_mcp.ide_discovery import (
+from pycharm_code_quality_mcp import errors
+from pycharm_code_quality_mcp.backends.sonar.client import SonarClient
+from pycharm_code_quality_mcp.backends.sonar.discovery import (
     PORT_MAX,
     PORT_MIN,
     IdeDiscovery,
@@ -16,7 +17,6 @@ from pycharm_sonar_mcp.ide_discovery import (
     looks_like_sonar_status,
     parse_explicit_port,
 )
-from pycharm_sonar_mcp.sonar_client import SonarClient
 
 
 def _build_discovery(client: SonarClient, **kwargs: Any) -> IdeDiscovery:

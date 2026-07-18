@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from pycharm_sonar_mcp import errors
-from pycharm_sonar_mcp.result_summary import assert_single_project_root
-from pycharm_sonar_mcp.workspace import require_workspace_roots, resolve_workspace_roots
+from pycharm_code_quality_mcp import errors
+from pycharm_code_quality_mcp.backends.sonar.result_summary import assert_single_project_root
+from pycharm_code_quality_mcp.core.workspace import require_workspace_roots, resolve_workspace_roots
 
 # ---------------------------------------------------------------------------
 # resolve_workspace_roots

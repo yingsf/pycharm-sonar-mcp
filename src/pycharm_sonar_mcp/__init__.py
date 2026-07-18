@@ -1,10 +1,13 @@
-"""PyCharm Sonar MCP —— 连接 Codex/Claude Code 与 PyCharm 中 SonarQube for IDE 的本地桥接层
+"""兼容包装层:pycharm_sonar_mcp 已重命名为 pycharm_code_quality_mcp
 
-本包仅作为本地桥接层,不打包、不分发、不修改任何 SonarSource 分析器、插件、规则包或
-二进制组件。它只调用用户本机 PyCharm 中 SonarQube for IDE 已在回环接口上开放的本地 HTTP 接口。
+本包仅作为向后兼容入口,所有实现已迁移到 pycharm_code_quality_mcp。
+新代码应直接导入 pycharm_code_quality_mcp。
+
+迁移提示在 cli.main() 入口输出,避免每次 import 都触发 warning。
 """
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+from pycharm_code_quality_mcp import __version__
+
 __all__ = ["__version__"]

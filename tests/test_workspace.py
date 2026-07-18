@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from pycharm_sonar_mcp import errors
-from pycharm_sonar_mcp import path_utils as pu
+from pycharm_code_quality_mcp import errors
+from pycharm_code_quality_mcp.core import path_utils as pu
 
 IS_WINDOWS = sys.platform.startswith("win")
 

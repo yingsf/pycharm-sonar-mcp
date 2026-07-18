@@ -8,8 +8,8 @@ from typing import Any
 import httpx
 import pytest
 
-from pycharm_sonar_mcp import errors
-from pycharm_sonar_mcp.sonar_client import SonarClient
+from pycharm_code_quality_mcp import errors
+from pycharm_code_quality_mcp.backends.sonar.client import SonarClient
 
 
 def _ok_status() -> dict[str, Any]:
