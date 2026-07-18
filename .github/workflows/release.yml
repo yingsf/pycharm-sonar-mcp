@@ -16,6 +16,7 @@ jobs:
   build:
     name: build (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
       matrix:
@@ -23,18 +24,19 @@ jobs:
           - label: macos-arm64
             os: macos-14
             artifact_name: pycharm-sonar-mcp-macos-arm64
-            py_request: "3.12"
-            run_arch: ""          # native arm64
+            optional: false
+          # macos-13 (Intel) is heavily rate-limited for free accounts. It is marked
+          # optional so a queued/failed Intel build never blocks the release; the arm64
+          # and Windows binaries still ship. Re-running the workflow later, once Intel
+          # capacity frees up, produces the missing macos-x64 artifact.
           - label: macos-x64
-            os: macos-14          # Apple Silicon runner; build x64 via an x86_64 Python
+            os: macos-13
             artifact_name: pycharm-sonar-mcp-macos-x64
-            py_request: "cpython-3.12-macos-x86_64-none"
-            run_arch: "x86_64"    # smoke-test the x64 binary under Rosetta
+            optional: true
           - label: windows-x64
             os: windows-latest
             artifact_name: pycharm-sonar-mcp-windows-x64.exe
-            py_request: "3.12"
-            run_arch: ""
+            optional: false
     steps:
       - uses: actions/checkout@v4
 
@@ -43,20 +45,16 @@ jobs:
         with:
           enable-cache: true
 
-      # For the macOS x64 build we request an x86_64 CPython from uv and run PyInstaller
-      # against it. uv itself keeps running natively on arm64; only the Python it manages
-      # (and the binary PyInstaller assembles from it) is x86_64. This avoids the scarce
-      # GitHub-hosted Intel macOS runner entirely.
       - name: Set up Python
-        run: uv python install "${{ matrix.py_request }}"
+        run: uv python install 3.12
 
       - name: Sync + add pyinstaller
         run: |
-          uv sync --python "${{ matrix.py_request }}"
+          uv sync --python 3.12
           uv pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: uv run --python "${{ matrix.py_request }}" pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
+        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
 
       - name: Rename binary (POSIX)
         if: runner.os != 'Windows'
@@ -69,7 +67,7 @@ jobs:
 
       - name: Smoke --version (POSIX)
         if: runner.os != 'Windows'
-        run: ${{ matrix.run_arch == 'x86_64' && 'arch -x86_64' || '' }} pyinstaller/dist/${{ matrix.artifact_name }} --version
+        run: pyinstaller/dist/${{ matrix.artifact_name }} --version
 
       - name: Smoke --version (Windows)
         if: runner.os == 'Windows'
@@ -94,7 +92,12 @@ jobs:
 
   release:
     name: publish release
+    # Run even if the optional macos-x64 build was skipped/failed, as long as the
+    # required builds (arm64 + windows) succeeded. The guard step below aborts the
+    # release when a required artifact is missing, so a failed required build still
+    # stops a broken release.
     needs: build
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,13 +107,22 @@ jobs:
         with:
           path: release-assets
 
-      - name: Flatten + list
+      - name: Flatten + verify required artifacts
         run: |
           mkdir -p staging
           find release-assets -type f -exec cp {} staging/ \;
-          # Include install scripts and source archive.
           cp scripts/install-macos.sh staging/
           cp scripts/install-windows.ps1 staging/
+          # arm64 and Windows binaries are required; the Intel macos-x64 is optional.
+          for required in pycharm-sonar-mcp-macos-arm64 pycharm-sonar-mcp-windows-x64.exe; do
+            if [ ! -f "staging/$required" ]; then
+              echo "Required artifact missing: $required — aborting release."
+              exit 1
+            fi
+          done
+          if [ ! -f staging/pycharm-sonar-mcp-macos-x64 ]; then
+            echo "WARNING: Intel macos-x64 artifact missing; release will ship without it."
+          fi
           ls -la staging
 
       - name: Generate SHA256SUMS
