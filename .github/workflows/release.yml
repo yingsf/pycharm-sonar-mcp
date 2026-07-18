@@ -46,7 +46,7 @@ jobs:
           uv pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: uv run pyinstaller --noconfirm --clean pyinstaller/pycharm-sonar-mcp.spec
+        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
 
       - name: Rename binary (POSIX)
         if: runner.os != 'Windows'
