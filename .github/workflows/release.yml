@@ -23,15 +23,18 @@ jobs:
           - label: macos-arm64
             os: macos-14
             artifact_name: pycharm-sonar-mcp-macos-arm64
-            cross_arch: ""        # native arm64 build
+            py_request: "3.12"
+            run_arch: ""          # native arm64
           - label: macos-x64
-            os: macos-14          # build on Apple Silicon runner under Rosetta
+            os: macos-14          # Apple Silicon runner; build x64 via an x86_64 Python
             artifact_name: pycharm-sonar-mcp-macos-x64
-            cross_arch: "x86_64"  # produce a native x64 binary via arch -x86_64
+            py_request: "cpython-3.12-macos-x86_64-none"
+            run_arch: "x86_64"    # smoke-test the x64 binary under Rosetta
           - label: windows-x64
             os: windows-latest
             artifact_name: pycharm-sonar-mcp-windows-x64.exe
-            cross_arch: ""
+            py_request: "3.12"
+            run_arch: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -40,19 +43,20 @@ jobs:
         with:
           enable-cache: true
 
-      # When cross_arch is set (x86_64), run the whole Python toolchain under Rosetta so
-      # uv installs an x86_64 Python and PyInstaller collects x86_64 binaries. This avoids
-      # depending on the scarce GitHub-hosted Intel macOS runner.
+      # For the macOS x64 build we request an x86_64 CPython from uv and run PyInstaller
+      # against it. uv itself keeps running natively on arm64; only the Python it manages
+      # (and the binary PyInstaller assembles from it) is x86_64. This avoids the scarce
+      # GitHub-hosted Intel macOS runner entirely.
       - name: Set up Python
-        run: ${{ matrix.cross_arch && 'arch -x86_64' || '' }} uv python install 3.12
+        run: uv python install "${{ matrix.py_request }}"
 
       - name: Sync + add pyinstaller
         run: |
-          ${{ matrix.cross_arch && 'arch -x86_64' || '' }} uv sync --python 3.12
-          ${{ matrix.cross_arch && 'arch -x86_64' || '' }} uv pip install pyinstaller
+          uv sync --python "${{ matrix.py_request }}"
+          uv pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: ${{ matrix.cross_arch && 'arch -x86_64' || '' }} uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
+        run: uv run --python "${{ matrix.py_request }}" pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
 
       - name: Rename binary (POSIX)
         if: runner.os != 'Windows'
@@ -65,7 +69,7 @@ jobs:
 
       - name: Smoke --version (POSIX)
         if: runner.os != 'Windows'
-        run: ${{ matrix.cross_arch == 'x86_64' && 'arch -x86_64' || '' }} pyinstaller/dist/${{ matrix.artifact_name }} --version
+        run: ${{ matrix.run_arch == 'x86_64' && 'arch -x86_64' || '' }} pyinstaller/dist/${{ matrix.artifact_name }} --version
 
       - name: Smoke --version (Windows)
         if: runner.os == 'Windows'
