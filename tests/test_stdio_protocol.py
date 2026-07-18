@@ -9,10 +9,20 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from typing import Any
+
+# Each spawned server process gets a dedicated background reader thread that
+# pumps stdout lines into a queue. The test helpers then consume from the queue
+# with a timeout. This avoids two Windows pitfalls: (1) a blocking readline()
+# on an empty pipe ignores any Python-level deadline, and (2) spawning a fresh
+# reader thread per line races on the shared stdout buffer. One thread per
+# process is both correct and fast.
+_LINES: dict[subprocess.Popen, queue.Queue[str | None]] = {}
 
 
 def _spawn(env_overrides: dict[str, str] | None = None) -> subprocess.Popen:
@@ -20,7 +30,7 @@ def _spawn(env_overrides: dict[str, str] | None = None) -> subprocess.Popen:
     env["PYTHONIOENCODING"] = "utf-8"
     if env_overrides:
         env.update(env_overrides)
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         [sys.executable, "-m", "pycharm_sonar_mcp", "serve"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -31,6 +41,18 @@ def _spawn(env_overrides: dict[str, str] | None = None) -> subprocess.Popen:
         env=env,
     )
 
+    q: queue.Queue[str | None] = queue.Queue()
+
+    def pump() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            q.put(line)
+        q.put(None)  # EOF sentinel
+
+    threading.Thread(target=pump, daemon=True).start()
+    _LINES[proc] = q
+    return proc
+
 
 def _send(proc: subprocess.Popen, obj: dict[str, Any]) -> None:
     assert proc.stdin is not None
@@ -38,38 +60,41 @@ def _send(proc: subprocess.Popen, obj: dict[str, Any]) -> None:
     proc.stdin.flush()
 
 
-def _recv(proc: subprocess.Popen, *, timeout: float = 10.0) -> dict[str, Any]:
-    """Read the next RESPONSE (skips notifications, which have no 'id').
+def _next_line(proc: subprocess.Popen, *, timeout: float) -> str | None:
+    """Pop one stdout line within timeout, or None on timeout/EOF."""
+    try:
+        return _LINES[proc].get(timeout=timeout)
+    except queue.Empty:
+        raise AssertionError("timed out waiting for a response on stdout") from None
 
-    Uses a worker thread per line so the deadline is honoured even when the
-    server stays silent: a blocking ``readline`` on a pipe without data would
-    otherwise ignore ``time.monotonic`` and stall the whole suite on Windows.
-    """
-    import queue
-    import threading
 
+def _recv(proc: subprocess.Popen, *, timeout: float = 15.0) -> dict[str, Any]:
+    """Read the next RESPONSE (skips notifications, which have no 'id')."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        q: queue.Queue[str | None] = queue.Queue()
-
-        def reader(q: queue.Queue[str | None] = q) -> None:
-            assert proc.stdout is not None
-            q.put(proc.stdout.readline())
-
-        t = threading.Thread(target=reader, daemon=True)
-        t.start()
-        remaining = max(0.0, deadline - time.monotonic())
-        try:
-            line = q.get(timeout=remaining)
-        except queue.Empty:
-            raise AssertionError("timed out waiting for a response on stdout") from None
-        if not line:
-            continue
+        remaining = max(0.1, deadline - time.monotonic())
+        line = _next_line(proc, timeout=remaining)
+        if line is None:
+            raise AssertionError("stdout closed before a response arrived")
         obj = json.loads(line)
         if "id" in obj:
             return obj
         # Notification (no 'id') — keep reading for the actual response.
     raise AssertionError("no response received on stdout")
+
+
+def _recv_or_skip(proc: subprocess.Popen, *, timeout: float = 5.0) -> dict[str, Any] | None:
+    """Read one line if it arrives within timeout, else return None."""
+    try:
+        line = _LINES[proc].get(timeout=timeout)
+    except queue.Empty:
+        return None
+    if line is None:
+        return None
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return None
 
 
 def _init(proc: subprocess.Popen) -> dict[str, Any]:
@@ -110,6 +135,7 @@ def _shutdown(proc: subprocess.Popen) -> None:
         if stream is not None:
             with contextlib.suppress(Exception):
                 stream.close()
+    _LINES.pop(proc, None)
 
 
 # ---------------------------------------------------------------------------
@@ -150,32 +176,6 @@ def test_unknown_method_returns_jsonrpc_error() -> None:
         _shutdown(proc)
 
 
-def _recv_or_skip(proc: subprocess.Popen, *, timeout: float = 5.0) -> dict[str, Any] | None:
-    """Read one stdout line if it arrives within timeout, else return None.
-
-    Unlike ``_recv`` this never blocks indefinitely: it uses a short-lived worker
-    thread to read a single line so the test cannot stall when the server stays
-    silent (e.g. on Windows the SDK may only log a notification for an unknown
-    method and never emit a matching response).
-    """
-    import threading
-
-    result: dict[str, Any] | None = None
-
-    def reader() -> None:
-        nonlocal result
-        assert proc.stdout is not None
-        line = proc.stdout.readline()
-        if line:
-            try:
-                result = json.loads(line)
-            except json.JSONDecodeError:
-                result = None
-
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
-    t.join(timeout=timeout)
-    return result
 
 
 def test_invalid_json_handled_gracefully() -> None:

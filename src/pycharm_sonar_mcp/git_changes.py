@@ -51,6 +51,10 @@ def _git(
         raise errors.git_command_failed("git executable not found on PATH.") from e
     except subprocess.TimeoutExpired as e:
         raise errors.git_command_failed(f"git command timed out: {' '.join(args)}") from e
+    except NotADirectoryError as e:
+        # Windows raises WinError 267 when cwd does not exist; treat as a failed git call
+        # so callers (is_git_repo / resolve_repo_root) report "not a repository" cleanly.
+        raise errors.git_command_failed(f"working directory does not exist: {cwd}") from e
     return proc.returncode, proc.stdout or "", proc.stderr or ""
 
 
