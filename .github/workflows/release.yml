@@ -14,21 +14,24 @@ permissions:
 
 jobs:
   build:
-    name: build (${{ matrix.os }})
+    name: build (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14         # Apple Silicon
-            arch: arm64
+          - label: macos-arm64
+            os: macos-14
             artifact_name: pycharm-sonar-mcp-macos-arm64
-          - os: macos-13         # Intel
-            arch: x64
+            cross_arch: ""        # native arm64 build
+          - label: macos-x64
+            os: macos-14          # build on Apple Silicon runner under Rosetta
             artifact_name: pycharm-sonar-mcp-macos-x64
-          - os: windows-latest
-            arch: x64
+            cross_arch: "x86_64"  # produce a native x64 binary via arch -x86_64
+          - label: windows-x64
+            os: windows-latest
             artifact_name: pycharm-sonar-mcp-windows-x64.exe
+            cross_arch: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -37,16 +40,19 @@ jobs:
         with:
           enable-cache: true
 
+      # When cross_arch is set (x86_64), run the whole Python toolchain under Rosetta so
+      # uv installs an x86_64 Python and PyInstaller collects x86_64 binaries. This avoids
+      # depending on the scarce GitHub-hosted Intel macOS runner.
       - name: Set up Python
-        run: uv python install 3.12
+        run: ${{ matrix.cross_arch && 'arch -x86_64' || '' }} uv python install 3.12
 
       - name: Sync + add pyinstaller
         run: |
-          uv sync --python 3.12
-          uv pip install pyinstaller
+          ${{ matrix.cross_arch && 'arch -x86_64' || '' }} uv sync --python 3.12
+          ${{ matrix.cross_arch && 'arch -x86_64' || '' }} uv pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
+        run: ${{ matrix.cross_arch && 'arch -x86_64' || '' }} uv run pyinstaller --noconfirm --clean --distpath pyinstaller/dist pyinstaller/pycharm-sonar-mcp.spec
 
       - name: Rename binary (POSIX)
         if: runner.os != 'Windows'
@@ -59,7 +65,7 @@ jobs:
 
       - name: Smoke --version (POSIX)
         if: runner.os != 'Windows'
-        run: pyinstaller/dist/${{ matrix.artifact_name }} --version
+        run: ${{ matrix.cross_arch == 'x86_64' && 'arch -x86_64' || '' }} pyinstaller/dist/${{ matrix.artifact_name }} --version
 
       - name: Smoke --version (Windows)
         if: runner.os == 'Windows'
