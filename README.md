@@ -1,0 +1,1 @@
+# pycharm-sonar-mcp
