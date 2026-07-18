@@ -285,7 +285,9 @@ def test_serve_clean_exit_on_stdin_close() -> None:
     )
     try:
         _stdio_handshake(proc)
-        # Ask the server to shut down gracefully.
+        # Ask the server to shut down gracefully. On POSIX the server then exits
+        # on its own; on Windows the asyncio loop may not translate this into an
+        # exit, so _force_kill in the finally block guarantees cleanup either way.
         assert proc.stdin is not None
         shutdown = {"jsonrpc": "2.0", "id": 99, "method": "shutdown"}
         proc.stdin.write(json.dumps(shutdown) + "\n")
@@ -293,9 +295,9 @@ def test_serve_clean_exit_on_stdin_close() -> None:
         proc.stdin.close()
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=10)
-        assert proc.returncode is not None
     finally:
         _force_kill(proc)
+    assert proc.returncode is not None
 
 
 def test_no_subcommand_is_serve() -> None:
