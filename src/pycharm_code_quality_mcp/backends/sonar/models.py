@@ -86,7 +86,7 @@ class InstanceInfo(BaseModel):
 
 
 class IdeStatusResult(BaseModel):
-    """`sonar_ide_status` 工具的结果"""
+    """Sonar 后端 IDE 状态探测的结果(供 code_quality_status 内部使用)"""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -122,7 +122,7 @@ class FailedFile(BaseModel):
 
 
 class AnalysisResult(BaseModel):
-    """sonar_analyze_files 与 sonar_analyze_git_changes 共用的统一结果"""
+    """Sonar 后端单次分析(文件或 git 变更)的统一结果"""
 
     model_config = ConfigDict(populate_by_name=True)
 

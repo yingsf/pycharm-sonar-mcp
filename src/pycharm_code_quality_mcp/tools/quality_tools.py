@@ -1,9 +1,10 @@
-"""统一默认工具(4 个,README 与 Agent 指令默认推荐)
+"""统一默认工具(5 个,README 与 Agent 指令默认推荐)
 
 工具:
   * code_quality_status            —— 报告 JetBrains+Sonar 两个后端的完整状态。
   * code_quality_analyze_files     —— 统一分析 1..200 个文件(auto 模式默认)。
   * code_quality_analyze_git_changes —— 收集 git 变更并统一分析。
+  * code_quality_analyze_project   —— 扫描整个仓库(默认所有 .py)并统一分析。
   * code_quality_clear_cache       —— 清除所有后端的内存缓存。
 
 默认 backend_mode = auto:
@@ -24,7 +25,7 @@ from typing import Any
 
 from .. import errors
 from ..backends.sonar.discovery import get_global_cache
-from ..core.git_changes import collect_changed_files
+from ..core.git_changes import collect_changed_files, collect_project_files
 from ..core.path_utils import dedupe_and_sort, normalize_path
 from ..logging_config import get_logger
 from ..quality.deduplication import DeduplicationMode
@@ -77,6 +78,13 @@ ANALYZE_GIT_DESCRIPTION = (
     "untracked; relative to base_ref) and analyze them with the unified backend strategy. "
     "Deleted files are excluded. Same deduplication and backend_mode options as "
     "code_quality_analyze_files."
+)
+ANALYZE_PROJECT_DESCRIPTION = (
+    "Scan all files in the git repository under project_root (default: all .py files, "
+    "tracked + untracked, .gitignore-respected) and analyze them with the unified backend "
+    "strategy. Use this when you want the whole repo rather than just git changes. "
+    "Pass `extensions` to scan other file types. Subject to the same 200-file limit and "
+    "deduplication options as code_quality_analyze_files."
 )
 CLEAR_CACHE_DESCRIPTION = (
     "Clear in-memory caches for all backends (Sonar port discovery, JetBrains session). "
@@ -153,9 +161,12 @@ async def impl_analyze_files(
             raise errors.bad_request("file_absolute_paths is empty.")
 
         roots = await gather_workspace_roots(ctx)
+        # 即便客户端没声明 Roots,只要调用方传了 project_root 就把它视为允许的工作区。
+        roots = ensure_workspace_roots(roots, project_root)
         if not roots:
             raise errors.workspace_not_configured(
-                "No workspace roots available. Configure MCP Roots or set SONAR_WORKSPACE_ROOTS."
+                "No workspace roots available. Configure MCP Roots, set SONAR_WORKSPACE_ROOTS, "
+                "or pass project_root."
             )
 
         if len(file_absolute_paths) > MAX_FILES:
@@ -300,6 +311,94 @@ async def impl_analyze_git_changes(
         return error_dict(errors.internal_error(str(e)), partial=True)
 
 
+async def impl_analyze_project(
+    project_root: str,
+    extensions: list[str] | None = None,
+    include_untracked: bool = True,
+    backend_mode: str = MODE_AUTO,
+    errors_only: bool = False,
+    deduplication_mode: str = DeduplicationMode.BALANCED,
+    ctx: AnyContext | None = None,
+) -> dict[str, Any]:
+    """code_quality_analyze_project:扫描整个仓库(默认 .py)并统一分析"""
+    try:
+        _validate_modes(backend_mode, deduplication_mode)
+
+        if not isinstance(project_root, str) or not project_root.strip():
+            raise errors.bad_request("project_root is required.")
+        norm_root = normalize_path(project_root)
+        if not os.path.isdir(norm_root):
+            raise errors.git_invalid_repository(f"project_root is not a directory: {norm_root}")
+
+        roots = await gather_workspace_roots(ctx)
+        roots = ensure_workspace_roots(roots, norm_root)
+
+        exts_tuple = tuple(extensions) if extensions else (".py",)
+
+        files = await asyncio.to_thread(
+            lambda: collect_project_files(
+                norm_root,
+                extensions=exts_tuple,
+                include_untracked=include_untracked,
+                workspace_roots=roots,
+            )
+        )
+
+        if not files:
+            # 仓库内没有匹配的源文件(显式空结果,不作为错误)。
+            return {
+                "success": True,
+                "partialSuccess": False,
+                "degradedMode": False,
+                "requestedFileCount": 0,
+                "analyzedFileCount": 0,
+                "rawFindingCount": 0,
+                "uniqueFindingCount": 0,
+                "duplicatesMerged": 0,
+                "possibleDuplicateCount": 0,
+                "deduplicationMode": deduplication_mode,
+                "severityCounts": {},
+                "backends": {},
+                "fileSummaries": [],
+                "findings": [],
+                "deduplicationGroups": [],
+                "possibleDuplicateGroups": [],
+                "notices": ["No files matching extensions in the repository."],
+                "durationMs": 0,
+                "projectRoot": norm_root,
+                "extensions": list(exts_tuple),
+                "scannedFileCount": 0,
+            }
+
+        if len(files) > MAX_FILES:
+            raise errors.too_many_files(
+                f"Too many files in repository ({len(files)} > {MAX_FILES}). "
+                "Narrow project_root to a subdirectory or call code_quality_analyze_files "
+                "with an explicit subset."
+            )
+
+        orch = _build_orchestrator()
+        result = await orch.analyze_files(
+            files,
+            backend_mode=backend_mode,
+            errors_only=errors_only,
+            deduplication_mode=deduplication_mode,
+            project_root=norm_root,
+            requested_file_count=len(files),
+        )
+        payload = result.model_dump(by_alias=True, exclude_none=False)
+        payload["projectRoot"] = norm_root
+        payload["extensions"] = list(exts_tuple)
+        payload["scannedFileCount"] = len(files)
+        return payload
+    except errors.SonarMcpError as e:
+        _log.warning("code_quality_analyze_project failed: %s", e)
+        return error_dict(e, partial=True)
+    except Exception as e:
+        _log.exception("Unexpected error in code_quality_analyze_project")
+        return error_dict(errors.internal_error(str(e)), partial=True)
+
+
 def impl_clear_cache(project_root: str | None = None) -> dict[str, Any]:
     """code_quality_clear_cache:清除所有后端的内存缓存(同步,无 I/O)
 
@@ -370,10 +469,12 @@ def _within(child: str, parent: str) -> bool:
 __all__ = [
     "ANALYZE_FILES_DESCRIPTION",
     "ANALYZE_GIT_DESCRIPTION",
+    "ANALYZE_PROJECT_DESCRIPTION",
     "CLEAR_CACHE_DESCRIPTION",
     "STATUS_DESCRIPTION",
     "impl_analyze_files",
     "impl_analyze_git_changes",
+    "impl_analyze_project",
     "impl_clear_cache",
     "impl_status",
 ]

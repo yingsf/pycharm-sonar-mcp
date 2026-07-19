@@ -195,20 +195,16 @@ def test_serve_tools_list_contains_eleven() -> None:
         resp = json.loads(raw)
         tools = {t["name"] for t in resp["result"]["tools"]}
         assert tools == {
-            # 统一默认(4)
+            # 统一默认(5)
             "code_quality_status",
             "code_quality_analyze_files",
             "code_quality_analyze_git_changes",
+            "code_quality_analyze_project",
             "code_quality_clear_cache",
             # JetBrains 专用(3)
             "jetbrains_ide_status",
             "jetbrains_inspect_files",
             "jetbrains_inspect_git_changes",
-            # 旧 Sonar(4,契约不变)
-            "sonar_ide_status",
-            "sonar_analyze_files",
-            "sonar_analyze_git_changes",
-            "sonar_clear_cache",
         }
     finally:
         _force_kill(proc)

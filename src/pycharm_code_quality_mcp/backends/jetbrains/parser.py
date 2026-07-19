@@ -145,7 +145,7 @@ def _try_json_object(text: str) -> dict[str, Any] | None:
         return None
     try:
         obj = json.loads(stripped)
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError:
         return None
     if isinstance(obj, dict):
         return obj
@@ -158,12 +158,15 @@ def _extract_problems_from_object(
 ) -> list[JetBrainsProblem] | None:
     """从单个 JSON 对象中提取 problems 列表
 
-    支持多种常见字段名:problems / findings / diagnostics / issues。
+    支持多种常见字段名:
+      * ``errors`` —— PyCharm MCP Server get_file_problems 实际返回的字段名
+      * ``problems`` / ``findings`` / ``diagnostics`` / ``issues`` —— 其他常见命名
+
     缺失时返回 None,表示此对象不含 problems(交由调用方继续尝试其他来源)。
     返回空列表表示确实无问题。
     """
     raw_list: Any = None
-    for key in ("problems", "findings", "diagnostics", "issues"):
+    for key in ("errors", "problems", "findings", "diagnostics", "issues"):
         if key in obj and isinstance(obj[key], list):
             raw_list = obj[key]
             break
@@ -175,30 +178,37 @@ def _extract_problems_from_object(
         if not isinstance(item, dict):
             _log.debug("Skipping non-object problem at index %d: %r", idx, item)
             continue
-        enriched = dict(item)
-        # 若问题本身没有 filePath,用本次请求的 file_path 回填。
-        enriched.setdefault("filePath", file_path)
-        # 行列号兜底:缺失时按 1-based 起点填充,避免下游崩溃。
-        enriched.setdefault("startLine", 1)
-        enriched.setdefault("startColumn", 1)
-        enriched.setdefault("endLine", enriched.get("startLine", 1))
-        enriched.setdefault("endColumn", enriched.get("startColumn", 1))
-        try:
-            problem = JetBrainsProblem.model_validate(enriched)
-        except Exception as e:  # 解析必须不崩溃
-            _log.warning(
-                "Failed to parse problem #%d for %s: %s; raw=%r",
-                idx,
-                file_path,
-                e,
-                item,
-            )
-            continue
-        # 把原始 dict 挂到 raw,便于前向兼容字段访问。
-        if not problem.raw:
-            problem.raw = item
-        problems.append(problem)
+        problem = _build_problem(item, file_path)
+        if problem is not None:
+            problems.append(problem)
     return problems
+
+
+def _build_problem(item: dict[str, Any], file_path: str) -> JetBrainsProblem | None:
+    """把单条原始 problem dict 映射成 JetBrainsProblem,失败时返回 None"""
+    enriched = dict(item)
+    # PyCharm MCP Server 返回的字段是 line/column(单数),模型期望 startLine/startColumn。
+    # 在解析前做字段映射,保留原始字段不动。
+    if "line" in enriched and "startLine" not in enriched:
+        enriched["startLine"] = enriched["line"]
+    if "column" in enriched and "startColumn" not in enriched:
+        enriched["startColumn"] = enriched["column"]
+    # 若问题本身没有 filePath,用本次请求的 file_path 回填。
+    enriched.setdefault("filePath", file_path)
+    # 行列号兜底:缺失时按 1-based 起点填充,避免下游崩溃。
+    enriched.setdefault("startLine", 1)
+    enriched.setdefault("startColumn", 1)
+    enriched.setdefault("endLine", enriched.get("startLine", 1))
+    enriched.setdefault("endColumn", enriched.get("startColumn", 1))
+    try:
+        problem = JetBrainsProblem.model_validate(enriched)
+    except Exception as e:  # 解析必须不崩溃
+        _log.warning("Failed to parse problem for %s: %s; raw=%r", file_path, e, item)
+        return None
+    # 把原始 dict 挂到 raw,便于前向兼容字段访问。
+    if not problem.raw:
+        problem.raw = item
+    return problem
 
 
 __all__ = [

@@ -125,7 +125,7 @@ def _file_marked_not_indexed(raw: dict[str, Any], target_file: str) -> bool:
 class PortCache:
     """内存态的 project_root -> port 缓存,不持久化,线程安全
 
-    MCP server 共享一个全局实例;每次调用 `sonar_clear_cache` 会清空它。
+    MCP server 共享一个全局实例;每次调用 `code_quality_clear_cache` 会清空它。
     """
 
     def __init__(self) -> None:

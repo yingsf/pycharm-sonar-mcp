@@ -225,7 +225,7 @@ def test_tools_list_schema_well_formed() -> None:
 
 
 def test_call_clear_cache_tool_returns_result() -> None:
-    """sonar_clear_cache should succeed with no IDE running (it's pure in-memory)."""
+    """code_quality_clear_cache should succeed with no IDE running (it's pure in-memory)."""
     proc = _spawn()
     try:
         _init(proc)
@@ -235,7 +235,7 @@ def test_call_clear_cache_tool_returns_result() -> None:
                 "jsonrpc": "2.0",
                 "id": 3,
                 "method": "tools/call",
-                "params": {"name": "sonar_clear_cache", "arguments": {}},
+                "params": {"name": "code_quality_clear_cache", "arguments": {}},
             },
         )
         resp = _recv(proc)
@@ -246,8 +246,8 @@ def test_call_clear_cache_tool_returns_result() -> None:
         _shutdown(proc)
 
 
-def test_call_ide_status_returns_structured() -> None:
-    """sonar_ide_status must return a structured result (available=false when no IDE)."""
+def test_call_status_returns_structured() -> None:
+    """code_quality_status must return a structured result (both backends reported)."""
     proc = _spawn()
     try:
         _init(proc)
@@ -257,14 +257,14 @@ def test_call_ide_status_returns_structured() -> None:
                 "jsonrpc": "2.0",
                 "id": 4,
                 "method": "tools/call",
-                "params": {"name": "sonar_ide_status", "arguments": {}},
+                "params": {"name": "code_quality_status", "arguments": {}},
             },
         )
         resp = _recv(proc)
         content_text = resp["result"]["content"][0]["text"]
         payload = json.loads(content_text)
         assert "available" in payload
-        assert "instanceCount" in payload
+        assert "backends" in payload
     finally:
         _shutdown(proc)
 
@@ -282,7 +282,7 @@ def test_call_analyze_files_with_no_workspace_returns_errorcode() -> None:
                 "id": 5,
                 "method": "tools/call",
                 "params": {
-                    "name": "sonar_analyze_files",
+                    "name": "code_quality_analyze_files",
                     "arguments": {"file_absolute_paths": ["/tmp/does-not-exist.py"]},
                 },
             },
@@ -309,7 +309,7 @@ def test_no_traceback_leaked_on_error() -> None:
                 "id": 6,
                 "method": "tools/call",
                 "params": {
-                    "name": "sonar_analyze_files",
+                    "name": "code_quality_analyze_files",
                     "arguments": {"file_absolute_paths": ["/tmp/x.py"]},
                 },
             },

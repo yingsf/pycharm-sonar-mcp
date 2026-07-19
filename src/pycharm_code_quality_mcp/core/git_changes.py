@@ -177,6 +177,85 @@ def collect_changed_files(
     return accepted
 
 
+def collect_project_files(
+    project_root: str,
+    *,
+    extensions: Sequence[str] = (".py",),
+    include_untracked: bool = True,
+    workspace_roots: list[str] | None = None,
+) -> list[str]:
+    """收集整个仓库中匹配指定扩展名的源文件绝对路径
+
+    用 `git ls-files -z` 列出 tracked 文件,可选追加 untracked(尊重 .gitignore)。
+    复用与 :func:`collect_changed_files` 相同的安全与过滤规范:
+      * 参数数组,绝不 shell=True;
+      * NUL 分隔,UTF-8 容错解码;
+      * 排除不存在/非普通文件/workspace 外路径;
+      * 稳定排序。
+
+    Args:
+        project_root: 仓库内任意路径,会通过 ``resolve_repo_root`` 解析到仓库根。
+        extensions: 允许的文件扩展名(大小写不敏感),默认只扫 Python。
+        include_untracked: 是否包含未跟踪文件(尊重 .gitignore)。
+        workspace_roots: 若提供,丢弃这些根之外的文件。
+
+    Returns:
+        归一化后的绝对路径,顺序稳定。
+    """
+    root = resolve_repo_root(project_root)
+    norm_exts = tuple(e.lower() for e in extensions) if extensions else ()
+
+    paths = _ls_tracked_files(root)
+    if include_untracked:
+        paths.extend(_ls_untracked_files(root))
+
+    deduped = _dedupe_preserve_order(paths)
+
+    accepted = _filter_project_files(deduped, norm_exts, workspace_roots)
+    accepted.sort(key=lambda p: os.path.normcase(p))
+    return accepted
+
+
+def _ls_tracked_files(root: str) -> list[str]:
+    """git ls-files 列出索引里的所有 tracked 文件,转绝对路径"""
+    rc, out, err = _git(["ls-files", "-z"], cwd=root)
+    if rc != 0:
+        raise errors.git_command_failed(f"git ls-files failed: {err.strip()}")
+    return [_join_root(root, p) for p in _split_nul(out)]
+
+
+def _ls_untracked_files(root: str) -> list[str]:
+    """git ls-files --others 列出未跟踪文件(尊重 .gitignore),转绝对路径"""
+    rc, out, err = _git(
+        ["ls-files", "--others", "--exclude-standard", "-z"],
+        cwd=root,
+    )
+    if rc != 0:
+        raise errors.git_command_failed(f"git ls-files (untracked) failed: {err.strip()}")
+    return [_join_root(root, p) for p in _split_nul(out)]
+
+
+def _filter_project_files(
+    paths: list[str],
+    norm_exts: tuple[str, ...],
+    workspace_roots: list[str] | None,
+) -> list[str]:
+    """按扩展名 / 存在性 / 普通文件 / workspace 归属过滤路径"""
+    accepted: list[str] = []
+    for p in paths:
+        if norm_exts and not p.lower().endswith(norm_exts):
+            continue
+        if not os.path.exists(p):
+            continue
+        if not os.path.isfile(p):
+            continue
+        if workspace_roots and not is_within_workspace(p, workspace_roots):
+            _log.debug("Skipping project path outside workspace: %s", p)
+            continue
+        accepted.append(p)
+    return accepted
+
+
 def _join_root(root: str, rel: str) -> str:
     """把 git 上报的相对路径拼接到仓库根上,生成绝对路径"""
     if not rel:

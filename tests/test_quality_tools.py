@@ -161,6 +161,17 @@ def test_analyze_files_no_workspace_rejected(monkeypatch, workspace: Path) -> No
     assert result["errorCode"] == errors.WORKSPACE_NOT_CONFIGURED
 
 
+def test_analyze_files_no_workspace_uses_project_root(monkeypatch, workspace: Path) -> None:
+    """无 MCP Roots + 无 env 时,显式传 project_root 应作为兜底工作区"""
+    os.environ.pop("SONAR_WORKSPACE_ROOTS", None)
+    file_path = _seed_file(workspace)
+    _patch_orch(monkeypatch, _FakeBackend("jetbrains"), None)
+    result = asyncio.run(
+        quality_tools.impl_analyze_files([file_path], project_root=str(workspace))
+    )
+    assert result["success"] is True
+
+
 def test_analyze_files_too_many(monkeypatch, workspace: Path) -> None:
     os.environ["SONAR_WORKSPACE_ROOTS"] = str(workspace)
     files = [_seed_file(workspace, f"f{i}.py") for i in range(201)]
@@ -291,3 +302,112 @@ def test_analyze_git_changes_no_changes(monkeypatch, tmp_path: Path) -> None:
     assert result["success"] is True
     assert result["changedFileCount"] == 0
     assert "No changed files" in result["notices"][0]
+
+
+# ---------------------------------------------------------------------------
+# code_quality_analyze_project
+# ---------------------------------------------------------------------------
+
+
+def _init_repo(repo: Path) -> None:
+    """在 tmp_path 下建一个带初始 commit 的 git repo(用于 analyze_project 测试)"""
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@t"], cwd=str(repo), check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "T"], cwd=str(repo), check=True, capture_output=True
+    )
+
+
+def _git_commit(repo: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "T",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "T",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        },
+    )
+
+
+def test_analyze_project_success(monkeypatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    (repo / "a.py").write_text("x=1\n")
+    (repo / "b.py").write_text("y=2\n")
+    _git_commit(repo)
+
+    _patch_orch(monkeypatch, _FakeBackend("jetbrains"), None)
+    result = asyncio.run(quality_tools.impl_analyze_project(str(repo)))
+    assert result["success"] is True
+    assert result["scannedFileCount"] == 2
+    assert result["extensions"] == [".py"]
+
+
+def test_analyze_project_respects_extensions(monkeypatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    (repo / "a.py").write_text("x=1\n")
+    (repo / "b.txt").write_text("hello\n")
+    (repo / "c.md").write_text("# title\n")
+    _git_commit(repo)
+
+    _patch_orch(monkeypatch, _FakeBackend("jetbrains"), None)
+    result = asyncio.run(quality_tools.impl_analyze_project(str(repo), extensions=[".py"]))
+    assert result["success"] is True
+    assert result["scannedFileCount"] == 1
+    assert result["extensions"] == [".py"]
+
+
+def test_analyze_project_empty_repo(monkeypatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    (repo / "README.md").write_text("# empty\n")
+    _git_commit(repo)
+
+    _patch_orch(monkeypatch, _FakeBackend("jetbrains"), None)
+    result = asyncio.run(quality_tools.impl_analyze_project(str(repo)))
+    assert result["success"] is True
+    assert result["scannedFileCount"] == 0
+    assert "No files matching extensions" in result["notices"][0]
+
+
+def test_analyze_project_not_a_repo(tmp_path: Path) -> None:
+    not_repo = tmp_path / "not_a_repo"
+    not_repo.mkdir()
+    (not_repo / "a.py").write_text("x=1\n")
+
+    result = asyncio.run(quality_tools.impl_analyze_project(str(not_repo)))
+    assert result["success"] is False
+    assert result["errorCode"] == errors.GIT_INVALID_REPOSITORY
+
+
+def test_analyze_project_no_workspace_uses_project_root(monkeypatch, tmp_path: Path) -> None:
+    """无 MCP Roots + 无 SONAR_WORKSPACE_ROOTS 时,project_root 应作为兜底工作区"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    (repo / "a.py").write_text("x=1\n")
+    _git_commit(repo)
+
+    # 清空环境变量,模拟无 Roots 场景。
+    monkeypatch.delenv("SONAR_WORKSPACE_ROOTS", raising=False)
+    _patch_orch(monkeypatch, _FakeBackend("jetbrains"), None)
+    result = asyncio.run(quality_tools.impl_analyze_project(str(repo)))
+    assert result["success"] is True
+    assert result["scannedFileCount"] == 1
+

@@ -296,18 +296,32 @@ def _location_score(a: _Derived, b: _Derived, line_distance: int) -> float:
         return 0.0
     ra, rb = a.range_tuple, b.range_tuple
     if ra is None or rb is None:
-        # 任一缺范围:用起始行距离打分。
-        if a.start_line == 0 or b.start_line == 0:
-            return 0.0
-        dist = abs(a.start_line - b.start_line)
-        if dist == 0:
-            return 0.8
-        if dist <= line_distance:
-            return 0.6
-        if dist <= line_distance + 2:
-            return 0.3
+        return _location_score_by_line(a.start_line, b.start_line, line_distance)
+    return _location_score_by_range(a, b, ra, rb, line_distance)
+
+
+def _location_score_by_line(start_a: int, start_b: int, line_distance: int) -> float:
+    """两边缺范围时,用起始行距离打分"""
+    if start_a == 0 or start_b == 0:
         return 0.0
-    # 两边都有范围。
+    dist = abs(start_a - start_b)
+    if dist == 0:
+        return 0.8
+    if dist <= line_distance:
+        return 0.6
+    if dist <= line_distance + 2:
+        return 0.3
+    return 0.0
+
+
+def _location_score_by_range(
+    a: _Derived,
+    b: _Derived,
+    ra: tuple[int, int, int, int],
+    rb: tuple[int, int, int, int],
+    line_distance: int,
+) -> float:
+    """两边都有范围时,优先用区间交并比,否则用起始行距离"""
     if _ranges_overlap(ra, rb):
         # 计算交并比(Jaccard),用行级区间近似。
         a_sl, _, a_el, _ = ra
@@ -356,7 +370,7 @@ def _message_score(a: _Derived, b: _Derived) -> float:
     ident_inter = len(a.identifiers & b.identifiers)
     ident_union = len(a.identifiers | b.identifiers)
     ident = (ident_inter / ident_union) if ident_union else 0.0
-    # 三者加权;取最大避免单一信号过低拉低总分。
+    # 加权融合:取相似度的最大值(避免单一信号过低拉低总分),再与标识符相似度做 7:3 加权。
     return max(jaccard, ratio, 0.0) * 0.7 + ident * 0.3
 
 
@@ -538,7 +552,7 @@ def _auto_merge_conditions(
 # ---------------------------------------------------------------------------
 
 
-def _cluster(
+def _cluster(  # NOSONAR - complete-link clustering inherently branches per pair/mode
     derived: list[_Derived],
     thresholds: _ModeThresholds,
 ) -> tuple[list[list[int]], list[tuple[int, int, float, str | None]]]:
@@ -644,11 +658,11 @@ def _select_representative(group: list[_Derived]) -> _Derived:
         # severity 取负 => rank 越大越前。
         return (-d.sev_rank, has_rule, has_range, msg_len, src_pri)
 
-    # 为保证确定性,先按原始下标稳定排序,再按 key 排序。
-    return sorted(group, key=lambda d: (sort_key(d), d.idx))[0]
+    # 取 (sort_key, idx) 联合最小者;idx 作为决胜字段保证全序与确定性。
+    return min(group, key=lambda d: (sort_key(d), d.idx))
 
 
-def _build_unified(group: list[_Derived]) -> UnifiedFinding:
+def _build_unified(group: list[_Derived]) -> UnifiedFinding:  # NOSONAR - merge logic branches per field
     """把一组 _Derived 合并为单个 UnifiedFinding"""
     rep = _select_representative(group)
     sources: list[str] = []
@@ -670,7 +684,7 @@ def _build_unified(group: list[_Derived]) -> UnifiedFinding:
 
     sev_name, sev_rank = severity.highest_severity(severities)
 
-    # range:优先用代表的;若代表无,退而求其次用组内任一存在的。
+    # 优先用代表 finding 的文本范围;若代表无,退而求其次用组内任一存在的。
     range_tuple = rep.range_tuple
     if range_tuple is None:
         for d in ordered:
@@ -745,7 +759,7 @@ def _group_max_confidence(group: list[_Derived]) -> float:
 # ---------------------------------------------------------------------------
 
 
-def deduplicate(
+def deduplicate(  # NOSONAR - top-level pipeline orchestrates many dedup phases
     findings: list[SourceFinding],
     mode: str = DeduplicationMode.BALANCED,
     file_anchor_hashes: dict[str, str | None] | None = None,

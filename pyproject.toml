@@ -34,10 +34,7 @@ dependencies = [
 ]
 
 [project.scripts]
-# 新主命令
 pycharm-code-quality-mcp = "pycharm_code_quality_mcp.cli:main"
-# 旧命令兼容入口(转发到同一实现)
-pycharm-sonar-mcp = "pycharm_sonar_mcp.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/yingsf/pycharm-code-quality-mcp"
@@ -45,7 +42,7 @@ Repository = "https://github.com/yingsf/pycharm-code-quality-mcp"
 Issues = "https://github.com/yingsf/pycharm-code-quality-mcp/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pycharm_code_quality_mcp", "src/pycharm_sonar_mcp"]
+packages = ["src/pycharm_code_quality_mcp"]
 
 [tool.ruff]
 target-version = "py311"
@@ -65,15 +62,15 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
-    "E501",  # line length handled by formatter
+    "E501",   # line length handled by formatter
     "RUF001", # 中英文混排时允许全角标点(中文 docstring 需要)
     "RUF002", # 同上:docstring 内的全角标点
     "RUF003", # 同上:注释内的全角标点
+    "SIM102", # 嵌套 if 有时语义不同,不强制合并(避免与 Sonar S7632 冲突)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B017"] # allow pytest.raises(Exception) in tests
-"src/pycharm_sonar_mcp/*" = ["F401", "F403"] # 兼容层 re-export
 
 [tool.ruff.format]
 quote-style = "double"
@@ -86,10 +83,6 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 packages = ["pycharm_code_quality_mcp"]
-
-[[tool.mypy.overrides]]
-module = "pycharm_sonar_mcp.*"
-follow_imports = "skip"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -104,7 +97,6 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning:mcp.*",
     "ignore::DeprecationWarning:pydantic.*",
-    "ignore::DeprecationWarning:pycharm_sonar_mcp.*",
     "ignore::ResourceWarning",
 ]
 

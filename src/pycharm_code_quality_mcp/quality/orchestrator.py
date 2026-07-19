@@ -73,7 +73,12 @@ class QualityOrchestrator:
         sn = await self._safe_status(self._sonar)
         jb_available = bool(jb.get("available")) if jb else False
         sn_available = bool(sn.get("available")) if sn else False
-        default_backend = "jetbrains" if jb_available else ("sonar" if sn_available else "none")
+        if jb_available:
+            default_backend = "jetbrains"
+        elif sn_available:
+            default_backend = "sonar"
+        else:
+            default_backend = "none"
         return {
             "available": jb_available or sn_available,
             "defaultBackend": default_backend,
@@ -96,7 +101,7 @@ class QualityOrchestrator:
     # 文件分析
     # ------------------------------------------------------------------
 
-    async def analyze_files(
+    async def analyze_files(  # NOSONAR - orchestrates backend selection, partial-success, degraded mode
         self,
         file_paths: list[str],
         *,

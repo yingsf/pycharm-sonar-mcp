@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from pycharm_code_quality_mcp import errors
 from pycharm_code_quality_mcp.backends.jetbrains.config import (
     is_loopback_url,
     load_config,
@@ -174,7 +176,7 @@ def test_save_config_rejects_non_loopback(monkeypatch, tmp_path) -> None:
         "pycharm_code_quality_mcp.backends.jetbrains.config.config_dir",
         lambda: tmp_path,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(errors.SonarMcpError):
         save_config("http://192.168.1.1:1234/mcp", {})
 
 
@@ -233,15 +235,52 @@ def test_doctor_with_file_arg_reports_target(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# tools/list 包含全部 11 个工具(回归保护)
+# tools/list 包含全部 8 个工具(回归保护)
 # ---------------------------------------------------------------------------
 
 
-def test_tools_count_is_eleven() -> None:
+def test_tools_count_is_eight() -> None:
     import asyncio
 
     from pycharm_code_quality_mcp.server import build_app
 
     app = build_app()
     tools = asyncio.run(app.list_tools())
-    assert len(tools) == 11
+    assert len(tools) == 8
+
+
+# ---------------------------------------------------------------------------
+# doctor: noqa 风格检查
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_reports_noqa_conflict(tmp_path: Path, monkeypatch) -> None:
+    """含 ruff 风格 `# noqa: Sxxx` 注释时,doctor 应输出 Noqa style conflict 警告"""
+    from pycharm_code_quality_mcp.doctor import run_doctor
+
+    (tmp_path / "a.py").write_text("x = 1  # noqa: S123\n")
+    monkeypatch.chdir(tmp_path)
+
+    buf = io.StringIO()
+    run_doctor(stream=buf)
+    out = buf.getvalue()
+    assert "Noqa style" in out
+    assert "NOSONAR" in out
+    assert "a.py:1" in out
+
+
+def test_doctor_noqa_clean(tmp_path: Path, monkeypatch) -> None:
+    """无 ruff 风格 noqa 冲突时,doctor 应输出 Noqa style [OK] 而非 [WARN]"""
+    from pycharm_code_quality_mcp.doctor import run_doctor
+
+    (tmp_path / "a.py").write_text("x = 1  # NOSONAR\n")
+    monkeypatch.chdir(tmp_path)
+
+    buf = io.StringIO()
+    run_doctor(stream=buf)
+    out = buf.getvalue()
+    # 找到 Noqa style 那一行,断言它是 [OK] 不是 [WARN]。
+    noqa_lines = [ln for ln in out.splitlines() if "Noqa style" in ln]
+    assert noqa_lines, "Noqa style line missing"
+    assert noqa_lines[0].lstrip().startswith("[OK]")
+    assert "[WARN]" not in noqa_lines[0]

@@ -59,8 +59,9 @@ def _effective_max_files() -> int:
 
 STATUS_DESCRIPTION = (
     "Probe the locally-configured JetBrains MCP Server (PyCharm) and report whether "
-    "it is configured, reachable, project-ready, and whether required tools "
-    "(get_project_status, get_file_problems) are exposed. Use this for diagnostics."
+    "it is configured, reachable, project-ready, and whether the required tool "
+    "(get_file_problems) is exposed. get_project_status is reported as optional "
+    "(absent on PyCharm 2026.1+). Use this for diagnostics."
 )
 INSPECT_FILES_DESCRIPTION = (
     "Inspect 1 to 200 absolute file paths with PyCharm's built-in JetBrains inspections "
@@ -152,9 +153,12 @@ async def impl_inspect_files(
             raise errors.bad_request("file_absolute_paths is empty.")
 
         roots = await gather_workspace_roots(ctx)
+        # 即便客户端没声明 Roots,只要调用方传了 project_root 就把它视为允许的工作区。
+        roots = ensure_workspace_roots(roots, project_root)
         if not roots:
             raise errors.workspace_not_configured(
-                "No workspace roots available. Configure MCP Roots or set SONAR_WORKSPACE_ROOTS."
+                "No workspace roots available. Configure MCP Roots, set SONAR_WORKSPACE_ROOTS, "
+                "or pass project_root."
             )
 
         max_files = _effective_max_files()

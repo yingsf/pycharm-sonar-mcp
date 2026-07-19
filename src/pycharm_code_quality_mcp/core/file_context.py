@@ -27,7 +27,6 @@ _DEFAULT_MAX_CHARS: int = 500
 # 硬性行数上限:即便调用方传入更大的 context_lines,也不会超过 3 行。
 _HARD_MAX_TOTAL_LINES: int = 3
 
-# 用于合并连续空白的正则;编译一次复用。
 _WS_RE: re.Pattern[str] = re.compile(r"\s+")
 
 

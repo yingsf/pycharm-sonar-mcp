@@ -1,4 +1,4 @@
-"""模块入口:`python -m pycharm_sonar_mcp` 等价于运行 CLI"""
+"""模块入口:`python -m pycharm_code_quality_mcp` 等价于运行 CLI"""
 
 from __future__ import annotations
 

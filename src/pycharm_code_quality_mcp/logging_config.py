@@ -60,7 +60,7 @@ def configure_logging() -> logging.Logger:
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
     # 时间戳统一使用 UTC,保证不同时区机器的日志可比较。
-    formatter.converter = _utc_time  # type: ignore[assignment]
+    formatter.converter = _utc_time
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
@@ -68,19 +68,29 @@ def configure_logging() -> logging.Logger:
     return logger
 
 
-def _utc_time(*args: object) -> float:
-    """返回当前 UTC 时间的 struct_time,供 logging.Formatter.converter 使用"""
-    return time.mktime(time.gmtime())
+def _utc_time(unused: object = None) -> time.struct_time:
+    """返回当前 UTC 时间的 struct_time,供 logging.Formatter.converter 使用
+
+    ``logging.Formatter.converter`` 的契约:接收一个 9 元素 time tuple,
+    返回一个 time tuple(或 struct_time)用于 strftime。我们忽略入参
+    (它是 locals 时间,我们要 UTC),改用 ``time.gmtime()`` 返回当前 UTC。
+    """
+    _ = unused  # 显式标注参数是故意忽略的(避免 lint 警告)
+    return time.gmtime()
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
     """返回包级 logger 的子 logger,首次调用时完成配置
 
     Args:
-        name: 子 logger 名称;None 或包名返回根包 logger,否则返回 `pycharm_sonar_mcp.<name>`。
+        name: 子 logger 名称;None 或包名返回根包 logger,否则返回
+            `pycharm_code_quality_mcp.<name>`。
     """
     configure_logging()
-    if name is None or name == _LOGGER_NAME:
+    # 拆成两段独立判断:让类型检查器明确收窄 name 为 str。
+    if name is None:
+        return logging.getLogger(_LOGGER_NAME)
+    if name == _LOGGER_NAME:
         return logging.getLogger(_LOGGER_NAME)
     if name.startswith(f"{_LOGGER_NAME}."):
         return logging.getLogger(name)

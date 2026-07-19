@@ -23,6 +23,7 @@ from pycharm_code_quality_mcp.backends.jetbrains.analyzer import (
 )
 from pycharm_code_quality_mcp.backends.jetbrains.client import (
     ALLOWED_TOOLS,
+    OPTIONAL_TOOLS,
     REQUIRED_TOOLS,
     JetBrainsClient,
 )
@@ -38,7 +39,10 @@ from pycharm_code_quality_mcp.backends.jetbrains.config import (
 
 def test_required_tools_subset_of_allowed() -> None:
     assert REQUIRED_TOOLS <= ALLOWED_TOOLS
-    assert {"get_project_status", "get_file_problems"} == REQUIRED_TOOLS
+    # 必需工具只有 get_file_problems;get_project_status 自 PyCharm 2026.1 起降级为可选。
+    assert {"get_file_problems"} == REQUIRED_TOOLS
+    assert {"get_project_status"} == OPTIONAL_TOOLS
+    assert REQUIRED_TOOLS.isdisjoint(OPTIONAL_TOOLS)
 
 
 def test_no_proxy_tools_in_allowed() -> None:
@@ -136,6 +140,20 @@ def test_client_call_before_connect_raises() -> None:
     client = JetBrainsClient(cfg)
     with pytest.raises(errors.SonarMcpError):
         asyncio.run(client.get_project_status())
+
+
+def test_get_project_status_degrades_when_tool_missing() -> None:
+    """服务端未暴露 get_project_status 时,get_project_status 应返回降级 dict 而非抛错"""
+    cfg = JetBrainsConfig(url="http://localhost:1/mcp", headers={})
+    client = JetBrainsClient(cfg)
+    # 模拟 connect() 完成后的状态:有 session,但服务端只暴露 get_file_problems。
+    client._available_tools = frozenset({"get_file_problems"})
+    # 用一个 sentinel session 让 _require_session 通过(实际不会发起 call_tool,
+    # 因为 available_tools 检查在 call_tool 之前)。
+    client._session = object()  # type: ignore[assignment]
+    result = asyncio.run(client.get_project_status())
+    assert result["isIndexing"] is False
+    assert result["projectStatusAvailable"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -161,7 +161,7 @@ def _cmd_setup(args: argparse.Namespace) -> int:
     print("This tool defaults to JetBrains inspections. To enable the JetBrains MCP backend:")
     print("  1. Open PyCharm → Settings → Tools → MCP Server.")
     print("  2. Enable MCP Server.")
-    print("  3. In 'Exposed Tools', enable: get_project_status, get_file_problems.")
+    print("  3. In 'Exposed Tools', enable: get_file_problems (required), get_project_status (optional).")
     print("  4. Click 'Copy HTTP Stream Config'.")
     print("  5. Run: pycharm-code-quality-mcp jetbrains configure --json '<paste config>'")
     print("")
@@ -185,8 +185,8 @@ def _cmd_setup(args: argparse.Namespace) -> int:
 def _cmd_jetbrains_configure(args: argparse.Namespace) -> int:
     """交互/非交互配置 JetBrains MCP,接收完整 JSON 并校验必需工具"""
     json_input: str | None = getattr(args, "json_input", None)
-    if not json_input:  # noqa: SIM102 - 内外两层 if 语义不同,不合并
-        # 从 stdin 读取(允许管道传入)。
+    if not json_input:
+        # 内外两层 if 语义不同,不合并:外层判 json_input 是否提供,内层判 stdin 是否可用。
         if not sys.stdin.isatty():
             json_input = sys.stdin.read().strip()
     if not json_input:
@@ -271,17 +271,7 @@ def _parse_jetbrains_stream_json(raw: str) -> tuple[str, dict[str, str]] | None:
     if not isinstance(obj, dict):
         return None
 
-    candidates: list[dict[str, object]] = []
-    if "url" in obj:
-        candidates.append(obj)
-    if isinstance(obj.get("transport"), dict):
-        candidates.append(obj["transport"])
-    if isinstance(obj.get("mcpServers"), dict):
-        for v in obj["mcpServers"].values():
-            if isinstance(v, dict):
-                candidates.append(v)
-
-    for cand in candidates:
+    for cand in _jetbrains_stream_candidates(obj):
         url = cand.get("url") or cand.get("endpoint")
         if isinstance(url, str) and url.strip():
             headers = cand.get("headers")
@@ -290,6 +280,22 @@ def _parse_jetbrains_stream_json(raw: str) -> tuple[str, dict[str, str]] | None:
                 hdr_dict = {str(k): str(v) for k, v in headers.items()}
             return url.strip(), hdr_dict
     return None
+
+
+def _jetbrains_stream_candidates(obj: dict[str, object]) -> list[dict[str, object]]:
+    """从原始 JSON 对象中收集所有可能携带 url/headers 的子对象"""
+    candidates: list[dict[str, object]] = []
+    if "url" in obj:
+        candidates.append(obj)
+    transport = obj.get("transport")
+    if isinstance(transport, dict):
+        candidates.append(transport)
+    mcp_servers = obj.get("mcpServers")
+    if isinstance(mcp_servers, dict):
+        for v in mcp_servers.values():
+            if isinstance(v, dict):
+                candidates.append(v)
+    return candidates
 
 
 def _cmd_jetbrains_status(_args: argparse.Namespace) -> int:
@@ -334,15 +340,18 @@ def _cmd_jetbrains_status(_args: argparse.Namespace) -> int:
 
 
 def _cmd_jetbrains_clear(_args: argparse.Namespace) -> int:
-    """删除已保存的 JetBrains 配置"""
+    """删除已保存的 JetBrains 配置(幂等:无配置时也视为成功)"""
     from .backends.jetbrains import config as jb_config
 
     removed = jb_config.clear_config()
     path = jb_config.config_file_path()
-    if removed:
-        print(f"Removed JetBrains MCP config at {path}")
-        return 0
-    print(f"No config file at {path} (nothing to clear).")
+    message = (
+        f"Removed JetBrains MCP config at {path}"
+        if removed
+        else f"No config file at {path} (nothing to clear)."
+    )
+    print(message)
+    # 幂等语义:无论是否实际删除,命令本身执行成功就返回 0。
     return 0
 
 

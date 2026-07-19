@@ -7,7 +7,6 @@
 # - Supports paths with spaces and CJK user names.
 # - Optionally registers with Codex and Claude Code (warnings only if absent).
 # - Runs `doctor` at the end.
-# - Migrates from the legacy name `pycharm-sonar-mcp` if present.
 #
 # Env overrides:
 #   PYCHARM_CODE_QUALITY_MCP_VERSION   tag/version to install (default: latest)
@@ -18,10 +17,8 @@
 set -euo pipefail
 
 PROG_NAME="pycharm-code-quality-mcp"
-LEGACY_PROG_NAME="pycharm-sonar-mcp"
 INSTALL_DIR="$HOME/.local/bin"
 INSTALL_PATH="$INSTALL_DIR/$PROG_NAME"
-LEGACY_INSTALL_PATH="$INSTALL_DIR/$LEGACY_PROG_NAME"
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t pcqm)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -46,12 +43,6 @@ case "$ARCH" in
     exit 1
     ;;
 esac
-
-# --- migrate from legacy name ---
-if [ -e "$LEGACY_INSTALL_PATH" ] && [ "$LEGACY_INSTALL_PATH" != "$INSTALL_PATH" ]; then
-  log "Found legacy install at $LEGACY_INSTALL_PATH; removing it in favor of $INSTALL_PATH."
-  rm -f "$LEGACY_INSTALL_PATH"
-fi
 
 # --- resolve version ---
 if [ -z "$VERSION" ]; then

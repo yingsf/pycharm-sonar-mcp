@@ -9,7 +9,6 @@
   - Supports paths with spaces and CJK user names.
   - Optionally registers with Codex and Claude Code (warnings only if absent).
   - Runs `doctor` at the end.
-  - Migrates from the legacy name `pycharm-sonar-mcp` if present.
 
   Requires Windows PowerShell 5.1+ or PowerShell 7+.
 
@@ -37,10 +36,6 @@ $InstallDir = Join-Path $env:LOCALAPPDATA "pycharm-code-quality-mcp"
 $InstallPath = Join-Path $InstallDir "$ProgName.exe"
 $BaseUrl = "https://github.com/yingsf/pycharm-code-quality-mcp/releases/download"
 $ArchTag = "windows-x64"
-
-# Legacy locations (for migration).
-$LegacyProgName = "pycharm-sonar-mcp"
-$LegacyInstallDir = Join-Path $env:LOCALAPPDATA "pycharm-sonar-mcp"
 
 function Write-Step($m) { Write-Host $m }
 function Write-Warn2($m) { Write-Host "warn: $m" -ForegroundColor Yellow }
@@ -72,20 +67,6 @@ $TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("pcqm-" + [guid]::NewGuid
 New-Item -ItemType Directory -Force -Path $TmpDir | Out-Null
 try {
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-
-  # --- migrate from legacy name ---
-  $legacyExe = Join-Path $LegacyInstallDir "$LegacyProgName.exe"
-  if (Test-Path $legacyExe) {
-    Write-Step "Found legacy install at $legacyExe; removing it in favor of $InstallPath."
-    try { Remove-Item -LiteralPath $legacyExe -Force -ErrorAction Stop } catch {}
-  }
-  if ((Test-Path $LegacyInstallDir) -and ($LegacyInstallDir -ne $InstallDir)) {
-    # Remove the old directory if it is now empty (best-effort).
-    $remaining = Get-ChildItem -LiteralPath $LegacyInstallDir -Force -ErrorAction SilentlyContinue
-    if (-not $remaining) {
-      try { Remove-Item -LiteralPath $LegacyInstallDir -Recurse -Force -ErrorAction Stop } catch {}
-    }
-  }
 
   $BinTmp = Join-Path $TmpDir "$ProgName-$ArchTag.exe"
   $SumsTmp = Join-Path $TmpDir "SHA256SUMS"

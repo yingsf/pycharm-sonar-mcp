@@ -59,6 +59,9 @@ dmypy.json
 *~
 .DS_Store
 
+# Agent session / planning artifacts (local working state, not source)
+.zcode/
+
 # PyInstaller
 pyinstaller/build/
 pyinstaller/dist/

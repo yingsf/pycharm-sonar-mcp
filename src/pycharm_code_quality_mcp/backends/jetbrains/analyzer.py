@@ -70,12 +70,15 @@ class JetBrainsBackend:
         self,
         file_paths: list[str],
         errors_only: bool = False,
+        project_root: str | None = None,
     ) -> JetBrainsAnalysisResult:
         """顺序分析给定文件,合并返回所有问题
 
         Args:
             file_paths: 绝对文件路径列表。
             errors_only: 是否只返回 error 级别问题。
+            project_root: 项目根目录。**强烈建议传入**:PyCharm MCP Server 需要它来
+                消歧多项目场景并接受相对路径。
 
         Returns:
             JetBrainsAnalysisResult:包含成功标志、合并问题、失败文件等。
@@ -99,11 +102,11 @@ class JetBrainsBackend:
         try:
             async with client:
                 # 1. 项目状态检查(indexing 时不短路,只标记,继续尝试)
-                project_indexing = await self._check_project_indexing(client)
+                project_indexing = await self._check_project_indexing(client, project_root)
 
                 # 2. 顺序分析每个文件
                 for fp in file_paths:
-                    outcome = await self._analyze_one(client, fp, errors_only)
+                    outcome = await self._analyze_one(client, fp, project_root, errors_only)
                     if outcome.failure is not None:
                         failed_files.append(outcome.failure)
                     all_problems.extend(outcome.problems)
@@ -135,10 +138,12 @@ class JetBrainsBackend:
     # 内部辅助
     # ------------------------------------------------------------------
 
-    async def _check_project_indexing(self, client: JetBrainsClient) -> bool:
+    async def _check_project_indexing(
+        self, client: JetBrainsClient, project_root: str | None = None
+    ) -> bool:
         """查询项目 indexing 状态;查询本身失败不致命,降级为 False"""
         try:
-            status = await client.get_project_status()
+            status = await client.get_project_status(project_root=project_root)
         except errors.SonarMcpError as e:
             _log.warning(
                 "get_project_status failed, assuming not indexing: [%s] %s",
@@ -155,11 +160,14 @@ class JetBrainsBackend:
         self,
         client: JetBrainsClient,
         file_path: str,
+        project_root: str | None,
         errors_only: bool,
     ) -> _OneOutcome:
         """分析单个文件,返回 _OneOutcome(成功 problems 或 failure 二选一)"""
         try:
-            problems = await client.get_file_problems(file_path, errors_only=errors_only)
+            problems = await client.get_file_problems(
+                file_path, project_root=project_root, errors_only=errors_only
+            )
         except errors.SonarMcpError as e:
             _log.warning(
                 "get_file_problems failed for %s: [%s] %s",
@@ -267,7 +275,11 @@ class JetBrainsAnalysisBackend(AnalysisBackend):
             return False
 
     async def get_status(self) -> dict[str, Any]:
-        """返回 JetBrains 后端状态:configured/available/projectReady/tools"""
+        """返回 JetBrains 后端状态:configured/available/projectReady/tools
+
+        ``tools`` 字段列出 PyCharm 实际暴露的白名单工具子集(连接后填充);
+        ``tools_allowed`` 列出我们允许调用的全集(便于诊断配置漂移)。
+        """
         result: dict[str, Any] = {
             "configured": True,
             "available": False,
@@ -284,6 +296,8 @@ class JetBrainsAnalysisBackend(AnalysisBackend):
         try:
             async with client:
                 status = await client.get_project_status()
+                # 连接成功后,用实际暴露的工具列表覆盖默认值。
+                result["tools"] = sorted(client._available_tools & ALLOWED_TOOLS)
             result["available"] = True
             result["indexing"] = bool(status.get("isIndexing", False))
             result["projectReady"] = not result["indexing"]
@@ -299,10 +313,13 @@ class JetBrainsAnalysisBackend(AnalysisBackend):
         errors_only: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """委托给 JetBrainsBackend,再把结果转换为统一 dict"""
+        """委托给 JetBrainsBackend,再把结果转换为统一 dict
+
+        kwargs 透传 ``project_root`` 等参数给底层 JetBrainsBackend.analyze_files。
+        """
         started = time.monotonic()
         res: JetBrainsAnalysisResult = await self._backend.analyze_files(
-            file_paths, errors_only=errors_only
+            file_paths, errors_only=errors_only, **kwargs
         )
         # 把每个 JetBrainsProblem 转成 SourceFinding(锚点 hash 内部预算)。
         source_findings = [_problem_to_source(p) for p in res.problems]

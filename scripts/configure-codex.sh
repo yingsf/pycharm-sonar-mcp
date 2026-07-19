@@ -11,7 +11,6 @@
 set -euo pipefail
 
 MCP_NAME="pycharm-code-quality"
-LEGACY_MCP_NAME="pycharm-sonar"
 FORCE=0
 
 for arg in "$@"; do
@@ -29,16 +28,11 @@ for arg in "$@"; do
 done
 
 # Resolve the absolute path to the executable.
-# Prefer pycharm-code-quality-mcp on PATH / ~/.local/bin; fall back to legacy name.
 EXE=""
 if command -v pycharm-code-quality-mcp >/dev/null 2>&1; then
   EXE="$(command -v pycharm-code-quality-mcp)"
 elif [ -x "$HOME/.local/bin/pycharm-code-quality-mcp" ]; then
   EXE="$HOME/.local/bin/pycharm-code-quality-mcp"
-elif command -v pycharm-sonar-mcp >/dev/null 2>&1; then
-  EXE="$(command -v pycharm-sonar-mcp)"
-elif [ -x "$HOME/.local/bin/pycharm-sonar-mcp" ]; then
-  EXE="$HOME/.local/bin/pycharm-sonar-mcp"
 fi
 
 if [ -z "$EXE" ]; then
@@ -60,15 +54,11 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 0
 fi
 
-# Check for an existing same-named entry (current or legacy name).
+# Check for an existing same-named entry.
 EXISTING=0
 if codex mcp list >/dev/null 2>&1; then
   if codex mcp list 2>/dev/null | tr ',' '\n' | grep -q "^${MCP_NAME}\$"; then
     EXISTING=1
-  elif codex mcp list 2>/dev/null | tr ',' '\n' | grep -q "^${LEGACY_MCP_NAME}\$"; then
-    EXISTING=1
-    # Remove the legacy-name entry so we can re-register under the new name.
-    codex mcp remove "$LEGACY_MCP_NAME" >/dev/null 2>&1 || true
   fi
 fi
 

@@ -16,7 +16,9 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import pathlib
 import platform
+import re
 import shutil
 import socket
 import sys
@@ -51,6 +53,7 @@ def run_doctor(
     report.line("== General ==")
     _report_environment(report, env)
     _report_tools(report, env)
+    _report_noqa_style(report)
     report.line("")
 
     # ---------------- JetBrains ----------------
@@ -64,7 +67,7 @@ def run_doctor(
     if sonar_instances:
         auth_ok, auth_detail = _check_authority(sonar_instances[0].port)
         (report.ok if auth_ok else report.fail)(f"HTTP authority (localhost): {auth_detail}")
-    _report_file_probe(report, file_path, sonar_instances, jb_ok)
+    _report_file_probe(report, file_path, sonar_instances)
     report.line("")
 
     # ---------------- 总评 ----------------
@@ -76,7 +79,7 @@ def run_doctor(
     elif sonar_instances:
         report.warn(
             "Degraded mode",
-            "JetBrains not available; falling back to SonarQube for IDE (legacy tools).",
+            "JetBrains not available; falling back to SonarQube for IDE as the only backend.",
         )
     else:
         report.fail(
@@ -135,6 +138,52 @@ def _report_tools(report: _Report, env: dict[str, str]) -> None:
         report.ok(f"SONAR_WORKSPACE_ROOTS: {roots_env}")
     else:
         report.info("SONAR_WORKSPACE_ROOTS", "not set (will rely on MCP client Roots)")
+
+
+# ruff 风格的 noqa 后跟 Sonar 规则号(S 开头 + 数字),例如 "noqa: S3776"。
+# SonarQube for IDE 不识别这种格式(它只认整行全大写的 nosonar 抑制符),所以这类
+# ruff 风格的注释对 Sonar 静默失效。
+# 注意:模式字符串拆开拼接,避免 ruff 把它当成真正的 noqa 指令解析。
+# 该正则基于文本扫描,不解析 Python 语法,因此测试夹具里写成字符串字面量的
+# ruff 风格 noqa 也会被匹配 —— 这是预期行为(用户可忽略此类已知夹具)。
+_RUFF_NOQA_SONAR_RE = re.compile("#" + r"\s*" + "noqa" + r"\b[^\n]*\bS\d+", re.IGNORECASE)
+# 扫描时要跳过的目录(噪声:虚拟环境、构建产物、缓存等)。
+_NOQA_SCAN_SKIP_DIRS = frozenset(
+    {".venv", "venv", ".git", "__pycache__", "build", "dist", "node_modules", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
+)
+
+
+def _report_noqa_style(report: _Report) -> None:
+    """扫描 cwd 下 Python 文件,检测 ruff 风格 `# noqa: Sxxx` 与 Sonar 不兼容的情况"""
+    try:
+        cwd = pathlib.Path(os.getcwd())
+        hits: list[tuple[str, int]] = []  # (相对路径, 行号)
+        scanned = 0
+        for py in cwd.rglob("*.py"):
+            # 跳过噪声目录下的文件。
+            if any(part in _NOQA_SCAN_SKIP_DIRS for part in py.relative_to(cwd).parts[:-1]):
+                continue
+            try:
+                text = py.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            scanned += 1
+            for i, line in enumerate(text.splitlines(), start=1):
+                if _RUFF_NOQA_SONAR_RE.search(line):
+                    hits.append((str(py.relative_to(cwd)), i))
+        if not hits:
+            report.ok("Noqa style", f"no ruff-style '# noqa: S...' in {scanned} Python file(s)")
+            return
+        files = {h[0] for h in hits}
+        first = hits[0]
+        report.warn(
+            "Noqa style conflict",
+            f"found {len(hits)} '# noqa: S...' comment(s) in {len(files)} file(s); "
+            f"SonarQube for IDE ignores these — use '# NOSONAR' instead. "
+            f"First: {first[0]}:{first[1]}",
+        )
+    except Exception as e:  # pragma: no cover - 防御性
+        report.warn("Noqa style", f"scan failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -269,9 +318,8 @@ def _report_file_probe(
     report: _Report,
     file_path: str | None,
     instances: list[Any],
-    jb_ok: bool,
 ) -> None:
-    """报告可选的目标文件索引探针(优先用 JetBrains,其次 Sonar)"""
+    """报告可选的目标文件索引探针(通过 Sonar IDE 实例查询)"""
     if not file_path:
         report.info("Target file", "not provided (use --file to test indexing)")
         return

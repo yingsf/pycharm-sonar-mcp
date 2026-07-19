@@ -6,10 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.0.0] — 2026-07-19
 
-This release repositions the project around **JetBrains inspections as the default
-backend**, with SonarQube for IDE as an auto-detected optional enhancement. The
-GitHub repository has been renamed to `pycharm-code-quality-mcp`; old names keep
-working through compatibility shims.
+This release positions the project around **JetBrains inspections as the default
+backend**, with SonarQube for IDE as an auto-detected optional enhancement.
 
 ### Added
 - **JetBrains MCP backend** (`backends/jetbrains/`): connects to PyCharm's built-in
@@ -45,18 +43,55 @@ working through compatibility shims.
 - **Code-anchor hashing** (`core/file_context.py`): reads ≤3 lines of context around
   a finding only to compute a SHA-256 hash; source text is never logged, returned,
   or persisted.
-- **Architecture refactor** (`tools/` package): `server.py` is now thin — it only
-  builds the FastMCP app, registers all 11 tools, and runs stdio. Business logic
-  lives in `tools/sonar_tools.py`, `tools/jetbrains_tools.py`, `tools/quality_tools.py`,
-  with shared workspace/path helpers in `tools/_shared.py`.
+- **Architecture refactor** (`tools/` package): `server.py` is thin — it only
+  builds the FastMCP app, registers all 8 tools, and runs stdio. Business logic
+  lives in `tools/jetbrains_tools.py` and `tools/quality_tools.py`, with shared
+  workspace/path helpers in `tools/_shared.py` and the Sonar backend singleton in
+  `tools/sonar_tools.py` / `tools/_sonar_instances.py`.
+- **`code_quality_analyze_project` tool**: scans the whole git repository under
+  `project_root` (default: all `.py` files, tracked + untracked, .gitignore-respected)
+  via `git ls-files`, then runs them through the unified backend strategy. Pass
+  `extensions` to scan other file types. Fills the gap where users previously had
+  to fake `base_ref` as the empty-tree SHA to scan the whole repo.
+- **`project_root` fallback for `*_files` tools**: `code_quality_analyze_files` and
+  `jetbrains_inspect_files` now treat an explicitly-passed `project_root` as an
+  allowed workspace when the MCP client provides no Roots and `SONAR_WORKSPACE_ROOTS`
+  is unset. Previously they returned `WORKSPACE_NOT_CONFIGURED`; now their behavior
+  matches `*_git_changes` / `*_project`.
+- **doctor: noqa style check**: scans the current working directory's Python files
+  and warns on ruff-style `# noqa: Sxxx` comments (e.g. `# noqa: S3776`). SonarQube
+  for IDE ignores these — it only honors `# NOSONAR` — so such comments silently fail
+  to suppress the intended Sonar rule. The doctor report points at the first conflict
+  and suggests the correct form.
+
+### Fixed
+- **JetBrains backend never actually connected** (5 bugs found via dogfooding):
+  1. `REQUIRED_TOOLS` demanded `get_project_status`, which PyCharm 2026.1+ no longer
+     exposes — now only `get_file_problems` is required; `get_project_status` degrades
+     to `{"isIndexing": False, "projectStatusAvailable": False}` when absent.
+  2. `get_file_problems` was called with `fileAbsolutePath` (wrong); the PyCharm MCP
+     schema requires `filePath` (project-relative). Fixed the parameter name and added
+     a `_to_relative_path` helper.
+  3. `projectPath` was never passed, so multi-project setups failed with
+     "Unable to determine the target project". Now threaded from `project_root`
+     through `JetBrainsAnalysisBackend` → `JetBrainsBackend` → `JetBrainsClient`.
+  4. Parser only recognized `problems` / `findings` / `diagnostics` / `issues` field
+     names; PyCharm actually returns `errors`. Added.
+  5. Parser only recognized `startLine` / `startColumn`; PyCharm returns `line` /
+     `column`. Added the alias mapping.
+- **`_utc_time` returned a float instead of `struct_time`**, causing
+  `TypeError: Tuple or struct_time argument required` on every log line. Fixed the
+  return type and made the unused parameter explicit.
+- **`get_logger` PyCharm type-narrowing false positive**: split the combined
+  `if name is None or name == _LOGGER_NAME:` into two separate checks so PyCharm's
+  flow analysis correctly narrows `name` to `str` before `name.startswith(...)`.
+- **doctor `tools` field** previously listed `ALLOWED_TOOLS` (the whitelist) even
+  when the server didn't expose all of them; now reports the actual exposed subset.
 
 ### Changed
 - **Default backend strategy is `auto`**: JetBrains first, Sonar auto-added when
   installed. Sonar-uninstalled is **not** a partial failure (JetBrains-only success
   is still `success=true`).
-- **Package renamed** `pycharm_sonar_mcp` → `pycharm_code_quality_mcp`;
-  distribution name → `pycharm-code-quality-mcp`; main command →
-  `pycharm-code-quality-mcp`; MCP server name → `pycharm-code-quality`.
 - **Config directory** via `platformdirs`:
   macOS `~/Library/Application Support/pycharm-code-quality-mcp/`,
   Windows `%LOCALAPPDATA%\pycharm-code-quality-mcp\`. POSIX config files are
@@ -65,55 +100,29 @@ working through compatibility shims.
   remote IPs, LAN addresses and public domains are refused. Headers never enter logs.
 - **Severity normalization**: JetBrains `ERROR`→`CRITICAL`, `WARNING`→`MAJOR`,
   `WEAK WARNING`/`TYPO`→`MINOR`, `INFORMATION`→`INFO`, `SERVER PROBLEM`→`MAJOR`.
-
-### Preserved (backward compatibility)
-- The four legacy `sonar_*` tools return their **original contract** unchanged
-  (`AnalysisResult` / `IdeStatusResult` / `ClearCacheResult`).
-- Old command `pycharm-sonar-mcp`, old MCP name `pycharm-sonar`, old package
-  `pycharm_sonar_mcp`, old env vars (`SONAR_IDE_PORT`, `SONAR_WORKSPACE_ROOTS`,
-  `PYCHARM_SONAR_MCP_LOG_LEVEL`) all keep working through a thin shim that delegates
-  to the new implementation. A migration notice is printed.
-- Legacy `sonar_*` tools and new `code_quality_*` tools share the same Sonar
-  port-discovery cache and HTTP transport — no second business implementation.
+- **Custom IPv4-loopback HTTP transport**: TCP dials `127.0.0.1` while the HTTP
+  `Host`/`Origin` authority stays `localhost`, defeating HTTP 421 and IPv6-first
+  `localhost` resolution.
+- **Cross-platform path safety**: normalization, drive-letter/UNC/case handling,
+  symlink and Windows junction escape detection, workspace containment enforcement.
+- **Git change collection** via NUL-separated (`-z`) git output (no `shell=True`),
+  with deletion/directory/out-of-workspace filtering and dedup.
+- **Partial-failure semantics**: failed batches never drop successful findings;
+  `partialSuccess`, `failedFiles`, `batchErrors` are reported explicitly.
+- **Cross-platform install/uninstall scripts** (macOS Bash 3.2, Windows PowerShell 5.1+)
+  with SHA-256 verification, atomic replacement, and best-effort Codex/Claude registration.
+- **PyInstaller spec** producing standalone binaries.
+- **GitHub Actions CI** (test matrix across Ubuntu/macOS/Windows × Python 3.11–3.13)
+  and a release workflow building per-platform binaries with smoke tests.
 
 ### Tests
-- Added comprehensive suites: orchestrator (backend selection / partial success /
+- Comprehensive suites: orchestrator (backend selection / partial success /
   degraded mode / severity merging), deduplication (merge conditions / forbidden
   pairs / transitive-chain protection / 4 modes / stable ordering), JetBrains
   parser (structuredContent / JSON TextContent / plain-text fallback / unknown
   fields), JetBrains client (config / loopback / whitelist / timeout / session
-  lifecycle), CLI new commands (setup / configure JSON parsing / clear / status /
+  lifecycle), CLI commands (setup / configure JSON parsing / clear / status /
   doctor sections), quality tools (status / analyze / clear-cache / git-changes
   empty case), severity / categorization / normalization / fingerprints.
-- The suite now has 334 passing tests (5 platform-skipped on non-Windows).
-
-## [0.1.0] — 2026-07-18
-
-### Added
-- First release. Local MCP server bridging Codex App / Codex CLI / Claude Code to the
-  SonarQube for IDE plugin running inside PyCharm on the developer's own machine.
-- Four MCP tools:
-  - `sonar_ide_status` — scans ports `64120..64130` and reports SonarQube for IDE instances.
-  - `sonar_analyze_files` — analyzes 1–200 absolute file paths (auto-batched 50/batch).
-  - `sonar_analyze_git_changes` — collects git changes (staged/unstaged/untracked vs `base_ref`) and analyzes them.
-  - `sonar_clear_cache` — clears the in-memory project→port discovery cache.
-- Custom IPv4-loopback HTTP transport: TCP dials `127.0.0.1` while the HTTP
-  `Host`/`Origin` authority stays `localhost`, defeating HTTP 421 and IPv6-first
-  `localhost` resolution.
-- Port discovery with heuristic status validation, in-memory project→port cache,
-  multi-instance file-ownership probing, and single-retry cache invalidation.
-- Cross-platform path safety: normalization, drive-letter/UNC/case handling, symlink
-  and Windows junction escape detection, workspace containment enforcement.
-- Git change collection via NUL-separated (`-z`) git output (no `shell=True`), with
-  deletion/directory/out-of-workspace filtering and dedup.
-- Partial-failure semantics: failed batches never drop successful findings;
-  `partialSuccess`, `failedFiles`, `batchErrors` are reported explicitly.
-- `doctor` diagnostics without `lsof`/`grep`/`sed`/`awk`/`netstat`/PowerShell external calls.
-- Cross-platform install/uninstall scripts (macOS Bash 3.2, Windows PowerShell 5.1+)
-  with SHA-256 verification, atomic replacement, and best-effort Codex/Claude registration.
-- PyInstaller spec producing standalone binaries.
-- GitHub Actions CI (test matrix across Ubuntu/macOS/Windows × Python 3.11–3.13) and a
-  release workflow building per-platform binaries with smoke tests.
 
 [1.0.0]: https://github.com/yingsf/pycharm-code-quality-mcp/releases/tag/v1.0.0
-[0.1.0]: https://github.com/yingsf/pycharm-code-quality-mcp/releases/tag/v0.1.0

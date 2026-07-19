@@ -8,7 +8,6 @@
 set -euo pipefail
 
 MCP_NAME="pycharm-code-quality"
-LEGACY_MCP_NAME="pycharm-sonar"
 FORCE=0
 
 for arg in "$@"; do
@@ -25,16 +24,12 @@ for arg in "$@"; do
   esac
 done
 
-# Resolve executable (prefer new name; fall back to legacy name).
+# Resolve executable.
 EXE=""
 if command -v pycharm-code-quality-mcp >/dev/null 2>&1; then
   EXE="$(command -v pycharm-code-quality-mcp)"
 elif [ -x "$HOME/.local/bin/pycharm-code-quality-mcp" ]; then
   EXE="$HOME/.local/bin/pycharm-code-quality-mcp"
-elif command -v pycharm-sonar-mcp >/dev/null 2>&1; then
-  EXE="$(command -v pycharm-sonar-mcp)"
-elif [ -x "$HOME/.local/bin/pycharm-sonar-mcp" ]; then
-  EXE="$HOME/.local/bin/pycharm-sonar-mcp"
 fi
 
 if [ -z "$EXE" ]; then
@@ -54,14 +49,11 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 0
 fi
 
-# Check existing registration (current or legacy name).
+# Check existing registration.
 EXISTING=0
 if claude mcp list >/dev/null 2>&1; then
   if claude mcp list 2>/dev/null | grep -q "$MCP_NAME"; then
     EXISTING=1
-  elif claude mcp list 2>/dev/null | grep -q "$LEGACY_MCP_NAME"; then
-    EXISTING=1
-    claude mcp remove "$LEGACY_MCP_NAME" >/dev/null 2>&1 || true
   fi
 fi
 

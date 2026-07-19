@@ -22,7 +22,7 @@ from typing import Final
 _WS_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
 
 # 结尾标点(中英文)统一去除
-_TRAILING_PUNCT_RE: Final[re.Pattern[str]] = re.compile(r"[。.,;；!！?？.]+$")
+_TRAILING_PUNCT_RE: Final[re.Pattern[str]] = re.compile(r"[。,;；!！?？.]+$")
 
 # 字符串字面量(单/双/三引号,含中文引号配对)-> <str>
 # 顺序:三引号在前,避免被单引号规则吃掉。

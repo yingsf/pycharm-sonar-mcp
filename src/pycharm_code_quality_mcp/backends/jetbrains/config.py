@@ -68,7 +68,7 @@ def is_loopback_url(url: str) -> bool:
         return False
     # 只接受 http(s) 形式,避免 file:// 等奇怪 scheme。
     lowered = url.strip().lower()
-    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+    if not lowered.startswith(("http://", "https://")):  # NOSONAR - loopback-only guard accepts http for local PyCharm MCP
         return False
     # 提取 netloc:scheme://[user@]host[:port]/...
     rest = url.split("://", 1)[1]
@@ -103,7 +103,7 @@ def _is_127_loopback(host: str) -> bool:
     return all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
 
 
-def load_config() -> JetBrainsConfig | None:
+def load_config() -> JetBrainsConfig | None:  # NOSONAR - env > file priority with validation branches
     """加载配置,优先级为环境变量 > 配置文件
 
     无任何配置时返回 None,不抛异常。
