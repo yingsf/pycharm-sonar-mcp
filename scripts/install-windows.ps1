@@ -122,8 +122,37 @@ try {
   # --- doctor ---
   Write-Step ""
   Write-Step "Running doctor..."
-  try { & $InstallPath doctor }
-  catch { Write-Warn2 "doctor reported issues." }
+  $DoctorOutput = ""
+  try {
+    $DoctorOutput = (& $InstallPath doctor 2>&1) | Out-String
+    Write-Host $DoctorOutput
+  } catch {
+    $DoctorOutput = $_.Exception.Message
+    Write-Warn2 "doctor reported issues."
+  }
+
+  # --- JetBrains 配置引导(若未配置,显式提示下一步) ---
+  if ($DoctorOutput -match "JetBrains MCP: not configured") {
+    Write-Step ""
+    Write-Host "================================================================" -ForegroundColor Yellow
+    Write-Host "  JetBrains backend is NOT configured yet." -ForegroundColor Yellow
+    Write-Host "Without this step, the tool falls back to SonarQube for IDE only" -ForegroundColor Yellow
+    Write-Host "(degraded mode). To enable PyCharm inspections:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "1. PyCharm -> Settings -> Tools -> MCP Server -> Enable MCP Server"
+    Write-Host "   In 'Exposed Tools', enable: get_file_problems (required)"
+    Write-Host "2. Click 'Copy HTTP Stream Config' (copies a JSON snippet)."
+    Write-Host "3. Run:"
+    Write-Host "   $InstallPath jetbrains configure --json '<paste JSON here>'"
+    Write-Host ""
+    Write-Host "Sample JSON (PyCharm typically copies one of these 3 shapes):"
+    Write-Host '   {"url":"http://127.0.0.1:64342/stream","headers":{}}'
+    Write-Host '   {"transport":{"type":"streamable-http","url":"http://127.0.0.1:64342/stream","headers":{}}}'
+    Write-Host '   {"mcpServers":{"pycharm":{"url":"http://127.0.0.1:64342/stream","headers":{}}}}'
+    Write-Host ""
+    Write-Host "The port (64342 here) is shown in PyCharm's MCP Server settings."
+    Write-Host "================================================================" -ForegroundColor Yellow
+  }
 
   Write-Step ""
   Write-Step "Done. Restart Codex App / reload Claude Code MCP to activate."

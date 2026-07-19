@@ -124,7 +124,31 @@ fi
 # --- doctor ---
 log ""
 log "Running doctor..."
-"$INSTALL_PATH" doctor || log "warn: doctor reported issues (exit $?)."
+DOCTOR_OUT="$("$INSTALL_PATH" doctor 2>&1)" || log "warn: doctor reported issues (exit $?)."
+echo "$DOCTOR_OUT"
+
+# --- JetBrains 配置引导(若未配置,显式提示下一步) ---
+if echo "$DOCTOR_OUT" | grep -q "JetBrains MCP: not configured"; then
+  log ""
+  log "================================================================"
+  log "⚠  JetBrains backend is NOT configured yet."
+  log "Without this step, the tool falls back to SonarQube for IDE only"
+  log "(degraded mode). To enable PyCharm inspections:"
+  log ""
+  log "1. PyCharm → Settings → Tools → MCP Server → Enable MCP Server"
+  log "   In 'Exposed Tools', enable: get_file_problems (required)"
+  log "2. Click 'Copy HTTP Stream Config' (copies a JSON snippet)."
+  log "3. Run:"
+  log "   $INSTALL_PATH jetbrains configure --json '<paste JSON here>'"
+  log ""
+  log "Sample JSON (PyCharm typically copies one of these 3 shapes):"
+  log '   {"url":"http://127.0.0.1:64342/stream","headers":{}}'
+  log '   {"transport":{"type":"streamable-http","url":"http://127.0.0.1:64342/stream","headers":{}}}'
+  log '   {"mcpServers":{"pycharm":{"url":"http://127.0.0.1:64342/stream","headers":{}}}}'
+  log ""
+  log "The port (64342 here) is shown in PyCharm's MCP Server settings."
+  log "================================================================"
+fi
 
 log ""
 log "Done. Restart Codex App / reload Claude Code MCP to activate."

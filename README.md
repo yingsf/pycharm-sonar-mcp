@@ -159,29 +159,63 @@ Codex App / Codex CLI / Claude Code
 ## 快速开始(macOS)
 
 ```bash
-# 1) 下载并安装二进制(arm64)
+# 1) 下载并安装二进制 + 自动注册到 Codex/Claude
 curl -fsSL https://github.com/yingsf/pycharm-code-quality-mcp/releases/latest/download/install-macos.sh \
   | bash
+```
 
-# 2) 配置 JetBrains HTTP Stream(参见上一节)
-pycharm-code-quality-mcp jetbrains configure
+安装脚本会在最后跑 `doctor`,如果检测到 JetBrains 还没配置,会**显式打印**
+配置引导(含 JSON 样例)。接着做第 2 步:
 
-# 3) 运行 doctor 验证
+```bash
+# 2) 在 PyCharm 里:
+#    Settings → Tools → MCP Server → 勾选 Enable MCP Server
+#    在 Exposed Tools 里启用 get_file_problems(必需)
+#    点击 "Copy HTTP Stream Config"(复制 JSON 到剪贴板)
+
+# 3) 把 JSON 喂给 configure(保存配置 + 真实连接校验)
+pycharm-code-quality-mcp jetbrains configure --json '<粘贴刚复制的 JSON>'
+```
+
+**PyCharm 复制的 JSON 三种常见形态**(configure 命令都支持):
+
+```jsonc
+// 形态 1: flat(最常见)
+{"url":"http://127.0.0.1:64342/stream","headers":{}}
+
+// 形态 2: transport 嵌套
+{"transport":{"type":"streamable-http","url":"http://127.0.0.1:64342/stream","headers":{}}}
+
+// 形态 3: mcpServers 嵌套
+{"mcpServers":{"pycharm":{"url":"http://127.0.0.1:64342/stream","headers":{}}}}
+```
+
+> 端口号 `64342` 只是示例,实际值在 PyCharm 的 MCP Server 设置面板里显示。
+> 如果你的 PyCharm 要求 token,会被放进 `headers` 字段(不会进入日志)。
+
+```bash
+# 4) 验证双后端都接通
 pycharm-code-quality-mcp doctor
 ```
 
-Intel macOS 用 `upload-macos-x64.sh` 产物。
+`doctor` 应显示 `[OK] JetBrains MCP configured` + `[OK] Project ready` +
+`[OK] Code quality analysis available through JetBrains inspections`。
+若仍报 `[WARN] Degraded mode`,说明 JetBrains 没接通,工具会退化为只用 Sonar。
+
+Intel macOS 用 `upload-macos-x64.sh` 产物(架构会自动识别,无需手动选)。
 
 ## 快速开始(Windows)
 
 ```powershell
-# 1) 下载 install-windows.ps1 并执行
+# 1) 下载并执行安装脚本
 iex (irm https://github.com/yingsf/pycharm-code-quality-mcp/releases/latest/download/install-windows.ps1)
 
-# 2) 配置 JetBrains HTTP Stream
-pycharm-code-quality-mcp jetbrains configure
+# 2) 在 PyCharm 里启用 MCP Server 并 Copy HTTP Stream Config(同上)
 
-# 3) 运行 doctor
+# 3) 配置 JetBrains
+pycharm-code-quality-mcp jetbrains configure --json '<粘贴 JSON>'
+
+# 4) 运行 doctor
 pycharm-code-quality-mcp doctor
 ```
 

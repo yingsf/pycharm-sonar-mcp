@@ -87,6 +87,11 @@ backend**, with SonarQube for IDE as an auto-detected optional enhancement.
   flow analysis correctly narrows `name` to `str` before `name.startswith(...)`.
 - **doctor `tools` field** previously listed `ALLOWED_TOOLS` (the whitelist) even
   when the server didn't expose all of them; now reports the actual exposed subset.
+- **Install scripts now prompt for JetBrains configuration**: `install-macos.sh`
+  and `install-windows.ps1` run `doctor` at the end and, if JetBrains MCP is not
+  configured, print an explicit next-steps banner (with sample JSON shapes and
+  the `jetbrains configure` command). Previously the install silently left users
+  in degraded mode with only an `[INFO]` line that was easy to miss.
 
 ### Changed
 - **Default backend strategy is `auto`**: JetBrains first, Sonar auto-added when
