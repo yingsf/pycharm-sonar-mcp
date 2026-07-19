@@ -46,6 +46,7 @@ Codex App / Codex CLI / Claude Code
 - [JetBrains MCP Server 启用方式](#jetbrains-mcp-server-启用方式)
 - [快速开始(macOS)](#快速开始macos)
 - [快速开始(Windows)](#快速开始windows)
+- [注册到 MCP 客户端(Codex/Claude)](#注册到-mcp-客户端codexclaude)
 - [CLI 子命令](#cli-子命令)
 - [doctor 三段诊断](#doctor-三段诊断)
 - [自动去重机制](#自动去重机制)
@@ -220,6 +221,80 @@ pycharm-code-quality-mcp doctor
 ```
 
 Windows 不需要 Python、Git Bash、WSL 或管理员权限。
+
+## 注册到 MCP 客户端(Codex/Claude)
+
+安装脚本(`install-macos.sh` / `install-windows.ps1`)会在装完二进制后**自动**
+把本工具注册到 Codex 和 Claude Code(若已安装)。注册名统一为
+`pycharm-code-quality`,传输方式 `stdio`。
+
+正常情况下你**不需要手动跑这一节**——除非:
+
+- 安装时跳过了自动注册(Codex/Claude 当时不在 PATH 上)
+- 你想换 scope(user / project / local)
+- 想写入团队共享的配置文件
+- 自动注册失败,需要手动排查
+
+### Codex CLI / Codex App
+
+```bash
+# 注册(用二进制的绝对路径,避免 PATH 依赖)
+codex mcp add pycharm-code-quality -- "$HOME/.local/bin/pycharm-code-quality-mcp"
+
+# 列出已注册的 MCP
+codex mcp list
+
+# 删除
+codex mcp remove pycharm-code-quality
+```
+
+### Claude Code
+
+```bash
+# 注册到 user scope(对所有项目生效)
+claude mcp add --transport stdio --scope user pycharm-code-quality \
+  -- "$HOME/.local/bin/pycharm-code-quality-mcp"
+
+# 列出
+claude mcp list
+
+# 删除
+claude mcp remove pycharm-code-quality
+```
+
+### ⚠️ 重要:别和 PyCharm 自带的 MCP 混淆
+
+PyCharm 2024.3+ 自带一个 **MCP Server**(URL 形式,直连 `http://127.0.0.1:port`),
+如果你在 Codex/Claude 里手动加过名为 `pycharm` 的 URL 注册,那是**直连 PyCharm**,
+**不是本工具**。两者区别:
+
+| 注册名 | 类型 | 作用 |
+| --- | --- | --- |
+| `pycharm-code-quality` | **stdio** + 本工具二进制 | 双后端(JetBrains + Sonar)+ 去重 + 8 个 `code_quality_*` / `jetbrains_*` 工具 |
+| `pycharm` (URL 形式) | HTTP/SSE 直连 PyCharm | PyCharm 暴露的 38 个原生工具(含执行类、改写类) |
+
+本工具走 stdio + 白名单只读调用(`get_file_problems`),**不会**触碰 PyCharm 的
+执行/改写工具。两个注册可以共存:Codex/Claude 既可以用本工具的 `code_quality_*`
+做只读分析,也可以直接调 `pycharm` 的原生工具做执行。
+
+### 配置文件位置(供团队推送 / 备份)
+
+- **Codex**:`~/.codex/config.toml`(或 `config.json`,看版本),MCP 段在 `mcp_servers` 下
+- **Claude Code**:`~/.claude.json`(user scope)或 项目 `.mcp.json`(project scope)
+
+### 单独重跑自动注册
+
+```bash
+# macOS/Linux
+./scripts/configure-codex.sh --force
+./scripts/configure-claude.sh --force
+
+# Windows
+powershell -File scripts\configure-codex.ps1 -Force
+powershell -File scripts\configure-claude.ps1 -Force
+```
+
+`--force` 会先 `remove` 旧的同名注册再 `add`,所以是幂等的。
 
 ## CLI 子命令
 
