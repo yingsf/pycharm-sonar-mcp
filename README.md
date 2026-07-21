@@ -331,7 +331,7 @@ PyCharm Sonar MCP Doctor
 
 == General ==
 [OK] Operating system: macOS 26.5 x64
-[OK] MCP version: 1.0.0
+[OK] MCP version: 1.0.1
 ...
 
 == JetBrains ==
@@ -352,10 +352,12 @@ Result: 0 failure(s), 0 warning(s)
 
 - **Sonar 未安装时 doctor 不整体失败**(只报 INFO/WARN)。
 - **JetBrains 未配置但 Sonar 可用**:doctor 报 degraded 警告,Sonar 仍可作后端。
-- **noqa 风格检查**:doctor 扫描 cwd 下 Python 文件,检测 ruff 风格的
-  `# noqa: Sxxx` 注释(例如 `# noqa: S3776`)。**SonarQube for IDE 不识别这种
-  ruff 风格的 noqa**,只认 `# NOSONAR`(全大写、整行抑制)。如果你写 `# noqa: Sxxx`
-  想抑制某条 Sonar 规则,它会**静默失效**。doctor 会列出冲突位置并提示改用
+- **noqa 风格检查**:doctor 只扫描明确的项目范围: `--file` 所在目录、
+  `SONAR_WORKSPACE_ROOTS`,或带有 `pyproject.toml` / `.git` 等项目标记的 cwd。
+  非项目目录(例如 `$HOME`)会跳过,避免安装时递归扫描大目录。该检查会检测
+  ruff 风格的 `# noqa: Sxxx` 注释(例如 `# noqa: S3776`)。**SonarQube for IDE
+  不识别这种 ruff 风格的 noqa**,只认 `# NOSONAR`(全大写、整行抑制)。如果你写
+  `# noqa: Sxxx` 想抑制某条 Sonar 规则,它会**静默失效**。doctor 会列出冲突位置并提示改用
   `# NOSONAR`。
 
 ## 自动去重机制

@@ -161,7 +161,9 @@ def _cmd_setup(args: argparse.Namespace) -> int:
     print("This tool defaults to JetBrains inspections. To enable the JetBrains MCP backend:")
     print("  1. Open PyCharm → Settings → Tools → MCP Server.")
     print("  2. Enable MCP Server.")
-    print("  3. In 'Exposed Tools', enable: get_file_problems (required), get_project_status (optional).")
+    print(
+        "  3. In 'Exposed Tools', enable: get_file_problems (required), get_project_status (optional)."
+    )
     print("  4. Click 'Copy HTTP Stream Config'.")
     print("  5. Run: pycharm-code-quality-mcp jetbrains configure --json '<paste config>'")
     print("")

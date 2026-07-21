@@ -124,8 +124,13 @@ fi
 # --- doctor ---
 log ""
 log "Running doctor..."
-DOCTOR_OUT="$("$INSTALL_PATH" doctor 2>&1)" || log "warn: doctor reported issues (exit $?)."
-echo "$DOCTOR_OUT"
+DOCTOR_LOG="$TMP_DIR/doctor.out"
+if "$INSTALL_PATH" doctor 2>&1 | tee "$DOCTOR_LOG"; then
+  :
+else
+  log "warn: doctor reported issues (exit $?)."
+fi
+DOCTOR_OUT="$(cat "$DOCTOR_LOG")"
 
 # --- JetBrains 配置引导(若未配置,显式提示下一步) ---
 if echo "$DOCTOR_OUT" | grep -q "JetBrains MCP: not configured"; then

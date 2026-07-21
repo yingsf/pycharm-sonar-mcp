@@ -166,9 +166,7 @@ def test_analyze_files_no_workspace_uses_project_root(monkeypatch, workspace: Pa
     os.environ.pop("SONAR_WORKSPACE_ROOTS", None)
     file_path = _seed_file(workspace)
     _patch_orch(monkeypatch, _FakeBackend("jetbrains"), None)
-    result = asyncio.run(
-        quality_tools.impl_analyze_files([file_path], project_root=str(workspace))
-    )
+    result = asyncio.run(quality_tools.impl_analyze_files([file_path], project_root=str(workspace)))
     assert result["success"] is True
 
 
@@ -410,4 +408,3 @@ def test_analyze_project_no_workspace_uses_project_root(monkeypatch, tmp_path: P
     result = asyncio.run(quality_tools.impl_analyze_project(str(repo)))
     assert result["success"] is True
     assert result["scannedFileCount"] == 1
-

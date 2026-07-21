@@ -258,6 +258,7 @@ def test_doctor_reports_noqa_conflict(tmp_path: Path, monkeypatch) -> None:
     """含 ruff 风格 `# noqa: Sxxx` 注释时,doctor 应输出 Noqa style conflict 警告"""
     from pycharm_code_quality_mcp.doctor import run_doctor
 
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'sample'\n")
     (tmp_path / "a.py").write_text("x = 1  # noqa: S123\n")
     monkeypatch.chdir(tmp_path)
 
@@ -273,6 +274,7 @@ def test_doctor_noqa_clean(tmp_path: Path, monkeypatch) -> None:
     """无 ruff 风格 noqa 冲突时,doctor 应输出 Noqa style [OK] 而非 [WARN]"""
     from pycharm_code_quality_mcp.doctor import run_doctor
 
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'sample'\n")
     (tmp_path / "a.py").write_text("x = 1  # NOSONAR\n")
     monkeypatch.chdir(tmp_path)
 
@@ -284,3 +286,19 @@ def test_doctor_noqa_clean(tmp_path: Path, monkeypatch) -> None:
     assert noqa_lines, "Noqa style line missing"
     assert noqa_lines[0].lstrip().startswith("[OK]")
     assert "[WARN]" not in noqa_lines[0]
+
+
+def test_doctor_noqa_skips_non_project_cwd(tmp_path: Path, monkeypatch) -> None:
+    """非项目目录不应触发无边界递归扫描。"""
+    from pycharm_code_quality_mcp.doctor import run_doctor
+
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "a.py").write_text("x = 1  # noqa: S123\n")
+    monkeypatch.chdir(tmp_path)
+
+    buf = io.StringIO()
+    run_doctor(stream=buf)
+    out = buf.getvalue()
+    assert "Noqa style: skipped" in out
+    assert "NOSONAR" not in out

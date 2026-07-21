@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-07-21
+
+### Fixed
+- **doctor no longer appears to hang when run from `$HOME` during install**:
+  the noqa style check now scans only explicit project roots (`--file`,
+  `SONAR_WORKSPACE_ROOTS`, or a cwd with project markers), prunes cache/venv
+  directories before descent, and caps the scan. The macOS installer now streams
+  doctor output live instead of buffering it until completion.
+
 ## [1.0.0] — 2026-07-19
 
 This release positions the project around **JetBrains inspections as the default
@@ -130,4 +139,5 @@ backend**, with SonarQube for IDE as an auto-detected optional enhancement.
   doctor sections), quality tools (status / analyze / clear-cache / git-changes
   empty case), severity / categorization / normalization / fingerprints.
 
+[1.0.1]: https://github.com/yingsf/pycharm-code-quality-mcp/releases/tag/v1.0.1
 [1.0.0]: https://github.com/yingsf/pycharm-code-quality-mcp/releases/tag/v1.0.0

@@ -662,7 +662,9 @@ def _select_representative(group: list[_Derived]) -> _Derived:
     return min(group, key=lambda d: (sort_key(d), d.idx))
 
 
-def _build_unified(group: list[_Derived]) -> UnifiedFinding:  # NOSONAR - merge logic branches per field
+def _build_unified(
+    group: list[_Derived],
+) -> UnifiedFinding:  # NOSONAR - merge logic branches per field
     """把一组 _Derived 合并为单个 UnifiedFinding"""
     rep = _select_representative(group)
     sources: list[str] = []

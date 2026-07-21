@@ -22,7 +22,7 @@ import re
 import shutil
 import socket
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 from . import __version__
@@ -53,7 +53,7 @@ def run_doctor(
     report.line("== General ==")
     _report_environment(report, env)
     _report_tools(report, env)
-    _report_noqa_style(report)
+    _report_noqa_style(report, env, file_path)
     report.line("")
 
     # ---------------- JetBrains ----------------
@@ -149,41 +149,175 @@ def _report_tools(report: _Report, env: dict[str, str]) -> None:
 _RUFF_NOQA_SONAR_RE = re.compile("#" + r"\s*" + "noqa" + r"\b[^\n]*\bS\d+", re.IGNORECASE)
 # 扫描时要跳过的目录(噪声:虚拟环境、构建产物、缓存等)。
 _NOQA_SCAN_SKIP_DIRS = frozenset(
-    {".venv", "venv", ".git", "__pycache__", "build", "dist", "node_modules", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
+    {
+        ".git",
+        ".mypy_cache",
+        ".nox",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "site-packages",
+        "venv",
+    }
 )
+_NOQA_PROJECT_MARKERS = frozenset(
+    {
+        ".git",
+        ".hg",
+        "noxfile.py",
+        "pyproject.toml",
+        "requirements.txt",
+        "setup.cfg",
+        "setup.py",
+        "tox.ini",
+    }
+)
+_NOQA_SCAN_MAX_FILES = 5000
 
 
-def _report_noqa_style(report: _Report) -> None:
-    """扫描 cwd 下 Python 文件,检测 ruff 风格 `# noqa: Sxxx` 与 Sonar 不兼容的情况"""
+def _report_noqa_style(report: _Report, env: dict[str, str], file_path: str | None) -> None:
+    """扫描项目 Python 文件,检测 ruff 风格 `# noqa: Sxxx` 与 Sonar 不兼容的情况"""
     try:
-        cwd = pathlib.Path(os.getcwd())
+        roots, skip_reason = _noqa_scan_roots(env, file_path)
+        if not roots:
+            report.info("Noqa style", f"skipped ({skip_reason})")
+            return
+
+        report.info("Python scan root", ", ".join(str(root) for root in roots))
         hits: list[tuple[str, int]] = []  # (相对路径, 行号)
         scanned = 0
-        for py in cwd.rglob("*.py"):
-            # 跳过噪声目录下的文件。
-            if any(part in _NOQA_SCAN_SKIP_DIRS for part in py.relative_to(cwd).parts[:-1]):
-                continue
-            try:
-                text = py.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            scanned += 1
-            for i, line in enumerate(text.splitlines(), start=1):
-                if _RUFF_NOQA_SONAR_RE.search(line):
-                    hits.append((str(py.relative_to(cwd)), i))
+        truncated = False
+        for root in roots:
+            for py in _iter_noqa_python_files(root):
+                if scanned >= _NOQA_SCAN_MAX_FILES:
+                    truncated = True
+                    break
+                rel = _relative_display_path(py, root)
+                # 跳过噪声目录下的文件。
+                if any(part in _NOQA_SCAN_SKIP_DIRS for part in pathlib.Path(rel).parts[:-1]):
+                    continue
+                scanned += 1
+                try:
+                    text = py.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                for i, line in enumerate(text.splitlines(), start=1):
+                    if _RUFF_NOQA_SONAR_RE.search(line):
+                        hits.append((rel, i))
+            if truncated:
+                break
+        if truncated and not hits:
+            report.warn(
+                "Noqa style",
+                f"scan stopped after {_NOQA_SCAN_MAX_FILES} Python file(s); no conflict found before limit",
+            )
+            return
         if not hits:
             report.ok("Noqa style", f"no ruff-style '# noqa: S...' in {scanned} Python file(s)")
             return
         files = {h[0] for h in hits}
         first = hits[0]
+        suffix = f"; scan stopped after {_NOQA_SCAN_MAX_FILES} Python file(s)" if truncated else ""
         report.warn(
             "Noqa style conflict",
-            f"found {len(hits)} '# noqa: S...' comment(s) in {len(files)} file(s); "
+            f"found {len(hits)} '# noqa: S...' comment(s) in {len(files)} file(s){suffix}; "
             f"SonarQube for IDE ignores these — use '# NOSONAR' instead. "
             f"First: {first[0]}:{first[1]}",
         )
     except Exception as e:  # pragma: no cover - 防御性
         report.warn("Noqa style", f"scan failed: {e}")
+
+
+def _noqa_scan_roots(env: dict[str, str], file_path: str | None) -> tuple[list[pathlib.Path], str]:
+    if file_path:
+        target = pathlib.Path(file_path).expanduser()
+        if target.is_file():
+            return _existing_unique_dirs(
+                [target.parent]
+            ), "--file parent is not an existing directory"
+
+    env_roots = _existing_unique_dirs(_raw_workspace_roots(env))
+    if env_roots:
+        return env_roots, f"no existing {env.get('SONAR_WORKSPACE_ROOTS', 'workspace root')}"
+
+    cwd = pathlib.Path(os.getcwd())
+    if _looks_like_project_dir(cwd):
+        return _existing_unique_dirs([cwd]), "cwd is not an existing directory"
+    return (
+        [],
+        "cwd is not a project directory; set SONAR_WORKSPACE_ROOTS or run doctor from a project root",
+    )
+
+
+def _raw_workspace_roots(env: dict[str, str]) -> list[pathlib.Path]:
+    raw = env.get("SONAR_WORKSPACE_ROOTS", "").strip()
+    if not raw:
+        return []
+    return [
+        pathlib.Path(part.strip()).expanduser() for part in raw.split(os.pathsep) if part.strip()
+    ]
+
+
+def _existing_unique_dirs(paths: list[pathlib.Path]) -> list[pathlib.Path]:
+    roots: list[pathlib.Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            root = path.resolve()
+        except OSError:
+            root = path.absolute()
+        if not root.is_dir():
+            continue
+        key = os.path.normcase(os.path.normpath(str(root)))
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(root)
+    return roots
+
+
+def _looks_like_project_dir(path: pathlib.Path) -> bool:
+    if _same_dir(path, pathlib.Path.home()):
+        return False
+    return any((path / marker).exists() for marker in _NOQA_PROJECT_MARKERS)
+
+
+def _same_dir(left: pathlib.Path, right: pathlib.Path) -> bool:
+    try:
+        left_s = str(left.resolve())
+    except OSError:
+        left_s = str(left.absolute())
+    try:
+        right_s = str(right.resolve())
+    except OSError:
+        right_s = str(right.absolute())
+    return os.path.normcase(os.path.normpath(left_s)) == os.path.normcase(os.path.normpath(right_s))
+
+
+def _iter_noqa_python_files(root: pathlib.Path) -> Iterator[pathlib.Path]:
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not _skip_noqa_dir(d)]
+        for filename in filenames:
+            if filename.endswith(".py"):
+                yield pathlib.Path(dirpath) / filename
+
+
+def _skip_noqa_dir(dirname: str) -> bool:
+    if dirname in _NOQA_SCAN_SKIP_DIRS:
+        return True
+    return dirname.startswith(".")
+
+
+def _relative_display_path(path: pathlib.Path, root: pathlib.Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 # ---------------------------------------------------------------------------
