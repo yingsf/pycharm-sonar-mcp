@@ -146,7 +146,7 @@ class QualityOrchestrator:
                 durationMs=int((time.monotonic() - started) * 1000),
             )
         # 探测各后端可用性(auto 模式下不可用则跳过)。
-        runnable = await self._resolve_runnable(backends_to_run, backend_mode)
+        runnable = await self._resolve_runnable(backends_to_run, backend_mode, project_root)
 
         if not runnable:
             # 无任何可用后端。
@@ -289,14 +289,14 @@ class QualityOrchestrator:
         return b
 
     async def _resolve_runnable(
-        self, backends: list[AnalysisBackend], mode: str
+        self, backends: list[AnalysisBackend], mode: str, project_root: str | None
     ) -> list[AnalysisBackend]:
         """探测可用性;auto 模式下不可用的后端被剔除"""
         if mode == MODE_AUTO:
             runnable: list[AnalysisBackend] = []
             for b in backends:
                 try:
-                    ok = await b.is_available()
+                    ok = await b.is_available(project_root=project_root)
                 except Exception:  # pragma: no cover - 防御性
                     ok = False
                 if ok:

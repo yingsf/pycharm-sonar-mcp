@@ -145,13 +145,15 @@ Codex App / Codex CLI / Claude Code
    pycharm-code-quality-mcp jetbrains configure --json '<paste config here>'
    ```
 
-   向导会自动识别 URL 和 headers(支持 flat / `transport` 嵌套 / `mcpServers`
-   三种 JSON 形态),保存配置,然后真实连接做 `initialize` + `tools/list`
-   校验,确认 `get_file_problems` 已暴露。
+   向导会自动识别 URL 和 headers(支持 flat / 顶层 `type: streamable-http` /
+   `transport` 嵌套 / `mcpServers` 嵌套形态),保存配置,然后真实连接做
+   `initialize` + `tools/list` 校验,确认 `get_file_problems` 已暴露。
 
-**多项目场景**:如果你在 PyCharm 里同时开了多个项目,`get_file_problems` 调用
-必须带 `projectPath` 参数来消歧。本工具的 `*_files` / `*_git_changes` /
-`*_project` 工具会自动把传入的 `project_root` 透传过去,无需手动配置。
+**多项目场景**:新版 PyCharm 复制的 JSON 可能在 headers 中带
+`IJ_MCP_SERVER_PROJECT_PATH`。本工具会在保存全局配置时剥离这个项目绑定 header,
+并在每次分析时根据 `project_root` / MCP Roots / 文件路径动态补全它。用户不需要为
+每个项目维护一份 JSON。若一次 `*_files` 调用跨多个 workspace roots,工具会拒绝请求,
+避免静默用错项目。
 
 **安全约束**:JetBrains URL 只允许 `localhost` / `127.0.0.1` / `::1`,
 远程 IP、局域网地址、公网域名一律拒绝。headers 不会进入日志。POSIX 上配置文件
@@ -178,7 +180,7 @@ curl -fsSL https://github.com/yingsf/pycharm-code-quality-mcp/releases/latest/do
 pycharm-code-quality-mcp jetbrains configure --json '<粘贴刚复制的 JSON>'
 ```
 
-**PyCharm 复制的 JSON 三种常见形态**(configure 命令都支持):
+**PyCharm 复制的 JSON 常见形态**(configure 命令都支持):
 
 ```jsonc
 // 形态 1: flat(最常见)
@@ -189,10 +191,14 @@ pycharm-code-quality-mcp jetbrains configure --json '<粘贴刚复制的 JSON>'
 
 // 形态 3: mcpServers 嵌套
 {"mcpServers":{"pycharm":{"url":"http://127.0.0.1:64342/stream","headers":{}}}}
+
+// 形态 4: 新版 PyCharm 顶层 streamable-http,可能带项目 header
+{"type":"streamable-http","url":"http://127.0.0.1:64462/stream","headers":{"IJ_MCP_SERVER_PROJECT_PATH":"/path/to/project"}}
 ```
 
 > 端口号 `64342` 只是示例,实际值在 PyCharm 的 MCP Server 设置面板里显示。
 > 如果你的 PyCharm 要求 token,会被放进 `headers` 字段(不会进入日志)。
+> `IJ_MCP_SERVER_PROJECT_PATH` 不会写入全局配置,分析时会按当前项目动态生成。
 
 ```bash
 # 4) 验证双后端都接通
@@ -331,7 +337,7 @@ PyCharm Sonar MCP Doctor
 
 == General ==
 [OK] Operating system: macOS 26.5 x64
-[OK] MCP version: 1.0.1
+[OK] MCP version: 1.0.2
 ...
 
 == JetBrains ==

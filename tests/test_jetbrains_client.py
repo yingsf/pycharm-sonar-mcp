@@ -26,10 +26,14 @@ from pycharm_code_quality_mcp.backends.jetbrains.client import (
     OPTIONAL_TOOLS,
     REQUIRED_TOOLS,
     JetBrainsClient,
+    _effective_headers,
 )
 from pycharm_code_quality_mcp.backends.jetbrains.config import (
+    PROJECT_PATH_HEADER,
     JetBrainsConfig,
+    headers_for_storage,
     is_loopback_url,
+    project_path_from_headers,
 )
 
 # ---------------------------------------------------------------------------
@@ -82,6 +86,39 @@ def test_backend_uses_env_url(monkeypatch) -> None:
     backend = JetBrainsAnalysisBackend()
     assert backend.config.url == "http://localhost:9999/mcp"
     assert backend.config.headers.get("X-Test") == "yes"
+
+
+def test_project_path_header_helpers() -> None:
+    headers = {
+        "Authorization": "Bearer x",
+        PROJECT_PATH_HEADER: "/tmp/project-a",
+    }
+    assert project_path_from_headers(headers) == "/tmp/project-a"
+    assert headers_for_storage(headers) == {"Authorization": "Bearer x"}
+
+
+def test_effective_headers_override_project_path_without_mutating_config() -> None:
+    cfg = JetBrainsConfig(
+        url="http://localhost:1/mcp",
+        headers={
+            "Authorization": "Bearer x",
+            PROJECT_PATH_HEADER: "/tmp/old-project",
+        },
+    )
+    effective = _effective_headers(cfg, "/tmp/new-project")
+    assert effective is not None
+    assert effective["Authorization"] == "Bearer x"
+    assert effective[PROJECT_PATH_HEADER] == "/tmp/new-project"
+    assert cfg.headers[PROJECT_PATH_HEADER] == "/tmp/old-project"
+
+
+def test_effective_headers_preserve_legacy_project_path_without_context() -> None:
+    cfg = JetBrainsConfig(
+        url="http://localhost:1/mcp",
+        headers={PROJECT_PATH_HEADER: "/tmp/legacy-project"},
+    )
+    effective = _effective_headers(cfg)
+    assert effective == {PROJECT_PATH_HEADER: "/tmp/legacy-project"}
 
 
 def test_backend_rejects_remote_env_url(monkeypatch) -> None:

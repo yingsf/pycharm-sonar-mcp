@@ -40,7 +40,8 @@ class _FakeBackend:
     def name(self) -> str:
         return self._name
 
-    async def is_available(self) -> bool:
+    async def is_available(self, **kwargs: Any) -> bool:
+        _ = kwargs
         return self._available
 
     async def get_status(self) -> dict[str, Any]:
@@ -168,6 +169,21 @@ def test_analyze_files_no_workspace_uses_project_root(monkeypatch, workspace: Pa
     _patch_orch(monkeypatch, _FakeBackend("jetbrains"), None)
     result = asyncio.run(quality_tools.impl_analyze_files([file_path], project_root=str(workspace)))
     assert result["success"] is True
+
+
+def test_analyze_files_rejects_multiple_workspace_roots(monkeypatch, tmp_path: Path) -> None:
+    workspace_a = tmp_path / "proj-a"
+    workspace_b = tmp_path / "proj-b"
+    file_a = _seed_file(workspace_a, "a.py")
+    file_b = _seed_file(workspace_b, "b.py")
+    os.environ["SONAR_WORKSPACE_ROOTS"] = f"{workspace_a}{os.pathsep}{workspace_b}"
+    _patch_orch(monkeypatch, _FakeBackend("jetbrains"), None)
+
+    result = asyncio.run(quality_tools.impl_analyze_files([file_a, file_b]))
+
+    assert result["success"] is False
+    assert result["errorCode"] == errors.BAD_REQUEST
+    assert "multiple workspace roots" in result["errorMessage"]
 
 
 def test_analyze_files_too_many(monkeypatch, workspace: Path) -> None:

@@ -105,6 +105,21 @@ def test_parse_stream_json_mcp_servers_form() -> None:
     assert headers["X-K"] == "v"
 
 
+def test_parse_stream_json_top_level_streamable_with_project_header() -> None:
+    from pycharm_code_quality_mcp.backends.jetbrains.config import PROJECT_PATH_HEADER
+    from pycharm_code_quality_mcp.cli import _parse_jetbrains_stream_json
+
+    raw = (
+        '{"type":"streamable-http","url":"http://127.0.0.1:64462/stream",'
+        f'"headers":{{"{PROJECT_PATH_HEADER}":"/tmp/project-a"}}}}'
+    )
+    parsed = _parse_jetbrains_stream_json(raw)
+    assert parsed is not None
+    url, headers = parsed
+    assert url == "http://127.0.0.1:64462/stream"
+    assert headers[PROJECT_PATH_HEADER] == "/tmp/project-a"
+
+
 def test_parse_stream_json_invalid_returns_none() -> None:
     from pycharm_code_quality_mcp.cli import _parse_jetbrains_stream_json
 
@@ -169,6 +184,29 @@ def test_save_and_load_config_roundtrip(monkeypatch, tmp_path) -> None:
     assert cfg.url == "http://localhost:1234/mcp"
     assert cfg.headers["Authorization"] == "Bearer abc"
     assert cfg.transport == "streamable-http"
+
+
+def test_save_config_strips_project_path_header(monkeypatch, tmp_path) -> None:
+    from pycharm_code_quality_mcp.backends.jetbrains.config import PROJECT_PATH_HEADER
+
+    monkeypatch.setattr(
+        "pycharm_code_quality_mcp.backends.jetbrains.config.config_dir",
+        lambda: tmp_path,
+    )
+    monkeypatch.setattr(
+        "pycharm_code_quality_mcp.backends.jetbrains.config.config_file_path",
+        lambda: tmp_path / "config.json",
+    )
+    save_config(
+        "http://localhost:1234/mcp",
+        {
+            "Authorization": "Bearer abc",
+            PROJECT_PATH_HEADER: "/tmp/project-a",
+        },
+    )
+    cfg = load_config()
+    assert cfg is not None
+    assert cfg.headers == {"Authorization": "Bearer abc"}
 
 
 def test_save_config_rejects_non_loopback(monkeypatch, tmp_path) -> None:

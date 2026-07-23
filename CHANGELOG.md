@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] — 2026-07-23
+
+### Fixed
+- **Dynamic PyCharm project routing**: newer PyCharm MCP JSON may include
+  `IJ_MCP_SERVER_PROJECT_PATH`. The CLI now strips that project-bound header from
+  global config while using it temporarily for configure-time verification. Runtime
+  JetBrains sessions dynamically set the header from the current `project_root` /
+  MCP Roots / analyzed file paths, so one saved config can safely serve multiple
+  projects.
+- **JetBrains inspect project-root propagation**: `jetbrains_inspect_files` now passes
+  the effective `project_root` into the backend instead of silently falling back to
+  absolute paths or stale saved headers.
+- **Auto-mode availability checks with project context**: `code_quality_*` auto mode
+  now probes JetBrains availability with the same project root used for analysis.
+- **Cross-project batch guard**: one `*_files` request spanning multiple workspace
+  roots is rejected with a clear error instead of risking analysis against the wrong
+  PyCharm project.
+- **Friendlier JetBrains transport failures**: HTTP transport cancellations during
+  initialize/tools/list/tool calls are mapped to stable JetBrains errors rather than
+  leaking raw `CancelledError` tracebacks.
+
 ## [1.0.1] — 2026-07-21
 
 ### Fixed

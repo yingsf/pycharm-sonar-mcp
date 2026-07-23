@@ -18,7 +18,7 @@ class AnalysisBackend(ABC):
         """后端标识名"""
 
     @abstractmethod
-    async def is_available(self) -> bool:
+    async def is_available(self, **kwargs: Any) -> bool:
         """后端是否可用"""
 
     @abstractmethod
@@ -36,5 +36,5 @@ class AnalysisBackend(ABC):
         """
 
     @abstractmethod
-    async def get_status(self) -> dict[str, Any]:
+    async def get_status(self, **kwargs: Any) -> dict[str, Any]:
         """返回后端状态"""

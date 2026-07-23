@@ -70,8 +70,9 @@ class SonarBackend(AnalysisBackend):
     # AnalysisBackend 实现
     # ------------------------------------------------------------------
 
-    async def is_available(self) -> bool:
+    async def is_available(self, **kwargs: Any) -> bool:
         """扫描端口,只要发现一个可用实例就返回 True;扫描过程不抛异常"""
+        _ = kwargs
         try:
             instances = await asyncio.to_thread(self._discovery.discover_all_instances)
         except Exception as e:  # pragma: no cover - 防御性
@@ -79,8 +80,9 @@ class SonarBackend(AnalysisBackend):
             return False
         return bool(instances)
 
-    async def get_status(self) -> dict[str, Any]:
+    async def get_status(self, **kwargs: Any) -> dict[str, Any]:
         """返回 Sonar 后端状态:installed / available / instances"""
+        _ = kwargs
         try:
             instances = await asyncio.to_thread(self._discovery.discover_all_instances)
         except Exception as e:  # pragma: no cover - 防御性

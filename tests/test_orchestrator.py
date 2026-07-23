@@ -46,12 +46,14 @@ class FakeBackend:
         self._success = success
         self._failed = failed_files or []
         self.analyze_calls = 0
+        self.available_kwargs: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
         return self._name
 
-    async def is_available(self) -> bool:
+    async def is_available(self, **kwargs: Any) -> bool:
+        self.available_kwargs = kwargs
         return self._available
 
     async def get_status(self) -> dict[str, Any]:
@@ -181,6 +183,7 @@ def test_analyze_auto_merges_both_backends() -> None:
     orch = QualityOrchestrator(jetbrains=jb, sonar=sn)  # type: ignore[arg-type]
     result = asyncio.run(orch.analyze_files(["/p/a.py"], backend_mode=MODE_AUTO, project_root="/p"))
     assert result.success is True
+    assert jb.available_kwargs == {"project_root": "/p"}
     assert result.raw_finding_count == 2
     # 同位置同消息 => 合并为 1 条。
     assert result.unique_finding_count == 1

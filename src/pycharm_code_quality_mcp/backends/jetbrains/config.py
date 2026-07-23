@@ -30,6 +30,8 @@ _ENV_HEADERS_JSON = "JETBRAINS_MCP_HEADERS_JSON"
 
 # 默认传输方式;目前仅实现 streamable-http
 _DEFAULT_TRANSPORT = "streamable-http"
+PROJECT_PATH_HEADER = "IJ_MCP_SERVER_PROJECT_PATH"
+_PROJECT_PATH_HEADER_LOWER = PROJECT_PATH_HEADER.lower()
 
 
 class JetBrainsConfig(BaseModel):
@@ -182,15 +184,36 @@ def _build_config(*, url: str, headers: dict[str, str]) -> JetBrainsConfig:
         raise errors.jetbrains_invalid_config(f"Invalid JetBrains MCP config: {e}") from e
 
 
+def is_project_path_header(name: str) -> bool:
+    """判断 header 名是否为 JetBrains 用于选择项目的动态 project path header"""
+    return name.lower() == _PROJECT_PATH_HEADER_LOWER
+
+
+def project_path_from_headers(headers: dict[str, str]) -> str | None:
+    """从 headers 中提取旧配置或 PyCharm 粘贴 JSON 携带的 project path"""
+    for key, value in headers.items():
+        if is_project_path_header(str(key)):
+            path = str(value).strip()
+            if path:
+                return path
+    return None
+
+
+def headers_for_storage(headers: dict[str, str]) -> dict[str, str]:
+    """返回适合写入全局配置的 headers,剥离项目绑定 header"""
+    return {str(k): str(v) for k, v in headers.items() if not is_project_path_header(str(k))}
+
+
 def save_config(url: str, headers: dict[str, str]) -> None:
     """保存配置到 config.json
 
     POSIX 文件系统上以 0600 权限保存,避免其他用户读取(可能包含鉴权头)。
+    ``IJ_MCP_SERVER_PROJECT_PATH`` 是按请求动态生成的项目路由 header,不写入全局配置。
     """
     if not is_loopback_url(url):
         raise errors.jetbrains_invalid_config("Refusing to save non-loopback JetBrains MCP URL.")
     # 先验证一遍模型,避免写出非法 JSON。
-    cfg = _build_config(url=url, headers=headers)
+    cfg = _build_config(url=url, headers=headers_for_storage(headers))
 
     path = config_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)

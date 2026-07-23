@@ -168,6 +168,47 @@ def within(child: str, parent: str) -> bool:
     return nc == np_ or nc.startswith(np_ + os.sep)
 
 
+def infer_single_project_root(
+    files: list[str],
+    roots: list[str],
+    explicit_project_root: str | None = None,
+) -> str | None:
+    """为一次 JetBrains 调用推断唯一 project root;跨项目批量请求会被拒绝"""
+    if explicit_project_root:
+        norm_root = normalize_path(explicit_project_root)
+        outside = [f for f in files if not within(f, norm_root)]
+        if outside:
+            raise errors.bad_request(
+                "All files must be inside project_root for JetBrains inspection. "
+                f"First outside file: {outside[0]}"
+            )
+        return norm_root
+
+    matched_roots: set[str] = set()
+    for file_path in files:
+        root = _best_matching_root(file_path, roots)
+        if root is not None:
+            matched_roots.add(root)
+
+    if len(matched_roots) > 1:
+        raise errors.bad_request(
+            "Files span multiple workspace roots. Run one analysis call per project root "
+            "or pass files from a single project."
+        )
+    if len(matched_roots) == 1:
+        return next(iter(matched_roots))
+    if files:
+        return os.path.dirname(files[0])
+    return None
+
+
+def _best_matching_root(file_path: str, roots: list[str]) -> str | None:
+    matches = [normalize_path(r) for r in roots if within(file_path, r)]
+    if not matches:
+        return None
+    return max(matches, key=len)
+
+
 def ensure_workspace_roots(roots: list[str], ctx_project_root: str | None = None) -> list[str]:
     """确保工作区根目录非空;若提供了 project_root 且不在 roots 内则补入
 
@@ -213,6 +254,7 @@ __all__ = [
     "error_dict",
     "filter_valid_files",
     "gather_workspace_roots",
+    "infer_single_project_root",
     "make_skipped_summary",
     "within",
 ]

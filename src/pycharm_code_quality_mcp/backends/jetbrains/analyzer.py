@@ -94,7 +94,11 @@ class JetBrainsBackend:
                 error=None,
             )
 
-        client = JetBrainsClient(self._config, timeout_ms=self._timeout_ms)
+        client = JetBrainsClient(
+            self._config,
+            timeout_ms=self._timeout_ms,
+            project_root=project_root,
+        )
         all_problems: list[JetBrainsProblem] = []
         failed_files: list[FailedFile] = []
         project_indexing = False
@@ -260,10 +264,15 @@ class JetBrainsAnalysisBackend(AnalysisBackend):
     def backend(self) -> JetBrainsBackend:
         return self._backend
 
-    async def is_available(self) -> bool:
+    async def is_available(self, **kwargs: Any) -> bool:
         """配置存在 + 能成功 initialize + tools/list 即视为可用"""
+        project_root = _kw_project_root(kwargs)
         try:
-            client = JetBrainsClient(self._config, timeout_ms=self._timeout_ms)
+            client = JetBrainsClient(
+                self._config,
+                timeout_ms=self._timeout_ms,
+                project_root=project_root,
+            )
         except Exception:  # pragma: no cover - 防御性
             return False
         try:
@@ -274,12 +283,13 @@ class JetBrainsAnalysisBackend(AnalysisBackend):
             _log.debug("JetBrains is_available probe failed: %s", e)
             return False
 
-    async def get_status(self) -> dict[str, Any]:
+    async def get_status(self, **kwargs: Any) -> dict[str, Any]:
         """返回 JetBrains 后端状态:configured/available/projectReady/tools
 
         ``tools`` 字段列出 PyCharm 实际暴露的白名单工具子集(连接后填充);
         ``tools_allowed`` 列出我们允许调用的全集(便于诊断配置漂移)。
         """
+        project_root = _kw_project_root(kwargs)
         result: dict[str, Any] = {
             "configured": True,
             "available": False,
@@ -289,7 +299,11 @@ class JetBrainsAnalysisBackend(AnalysisBackend):
             "url": _safe_url(self._config.url),
         }
         try:
-            client = JetBrainsClient(self._config, timeout_ms=self._timeout_ms)
+            client = JetBrainsClient(
+                self._config,
+                timeout_ms=self._timeout_ms,
+                project_root=project_root,
+            )
         except Exception as e:  # pragma: no cover - 防御性
             result["error"] = str(e)
             return result
@@ -374,6 +388,13 @@ def _problem_to_source(problem: JetBrainsProblem) -> Any:
 def _safe_url(url: str) -> str:
     """日志安全地暴露 URL(不暴露 headers,URL 本身是 loopback)"""
     return url or ""
+
+
+def _kw_project_root(kwargs: dict[str, Any]) -> str | None:
+    value = kwargs.get("project_root")
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
 
 
 __all__ = [

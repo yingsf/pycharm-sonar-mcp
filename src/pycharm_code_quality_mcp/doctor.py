@@ -330,7 +330,6 @@ def _report_jetbrains(report: _Report, env: dict[str, str], file_path: str | Non
 
     未配置时输出明确警告但不抛异常(仍允许 Sonar 单独工作)。
     """
-    _ = env
     from .backends.jetbrains import config as jb_config
 
     cfg = jb_config.load_config()
@@ -349,8 +348,12 @@ def _report_jetbrains(report: _Report, env: dict[str, str], file_path: str | Non
         report.fail("URL is NOT loopback", f"refusing to connect to {cfg.url}")
         return False
 
+    project_root = _infer_jetbrains_project_root(file_path, env)
+    if project_root:
+        report.info("JetBrains project root", project_root)
+
     # 真实连接 + initialize + tools/list + get_project_status。
-    status = _probe_jetbrains_status(cfg)
+    status = _probe_jetbrains_status(cfg, project_root=project_root)
     if status is None:
         report.fail("JetBrains MCP connect", "failed (see stderr for details)")
         return False
@@ -370,7 +373,7 @@ def _report_jetbrains(report: _Report, env: dict[str, str], file_path: str | Non
 
     # 可选文件探针:用 jetbrains_inspect_files 走一次。
     if file_path:
-        ok_file, detail = _probe_jetbrains_file(cfg, file_path)
+        ok_file, detail = _probe_jetbrains_file(cfg, file_path, project_root=project_root)
         if ok_file:
             report.ok(f"Target file inspected by JetBrains: {detail}")
         else:
@@ -378,13 +381,13 @@ def _report_jetbrains(report: _Report, env: dict[str, str], file_path: str | Non
     return True
 
 
-def _probe_jetbrains_status(cfg: Any) -> dict[str, Any] | None:
+def _probe_jetbrains_status(cfg: Any, project_root: str | None = None) -> dict[str, Any] | None:
     """真实探测 JetBrains MCP 状态;异常时返回 None(避免污染 doctor 主流程)"""
     from .backends.jetbrains.analyzer import JetBrainsAnalysisBackend
 
     async def _go() -> dict[str, Any]:
         backend = JetBrainsAnalysisBackend(cfg)
-        return await backend.get_status()
+        return await backend.get_status(project_root=project_root)
 
     try:
         return asyncio.run(_go())
@@ -393,7 +396,9 @@ def _probe_jetbrains_status(cfg: Any) -> dict[str, Any] | None:
         return None
 
 
-def _probe_jetbrains_file(cfg: Any, file_path: str) -> tuple[bool, str]:
+def _probe_jetbrains_file(
+    cfg: Any, file_path: str, project_root: str | None = None
+) -> tuple[bool, str]:
     """用 jetbrains_inspect_files 探测单个文件能否被分析"""
     if not os.path.isfile(file_path):
         return False, f"not a regular file: {file_path}"
@@ -402,7 +407,7 @@ def _probe_jetbrains_file(cfg: Any, file_path: str) -> tuple[bool, str]:
 
     async def _go() -> JetBrainsAnalysisResult:
         backend = JetBrainsAnalysisBackend(cfg)
-        return await backend.backend.analyze_files([file_path])
+        return await backend.backend.analyze_files([file_path], project_root=project_root)
 
     try:
         result = asyncio.run(_go())
@@ -410,6 +415,52 @@ def _probe_jetbrains_file(cfg: Any, file_path: str) -> tuple[bool, str]:
         return False, f"inspection raised: {type(e).__name__}: {e}"
     problems = getattr(result, "problems", None) or []
     return True, f"inspected ({len(problems)} problem(s))"
+
+
+def _infer_jetbrains_project_root(file_path: str | None, env: dict[str, str]) -> str | None:
+    candidates = _existing_unique_dirs(_raw_workspace_roots(env))
+    cwd = pathlib.Path(os.getcwd())
+    if _looks_like_project_dir(cwd):
+        candidates.extend(_existing_unique_dirs([cwd]))
+
+    if not file_path or not os.path.isfile(file_path):
+        if _looks_like_project_dir(cwd):
+            return str(_existing_unique_dirs([cwd])[0])
+        if len(candidates) == 1:
+            return str(candidates[0])
+        return None
+
+    try:
+        target = pathlib.Path(file_path).resolve()
+    except OSError:
+        target = pathlib.Path(file_path).absolute()
+
+    for root in sorted(candidates, key=lambda p: len(str(p)), reverse=True):
+        if _path_is_under(target, root):
+            return str(root)
+
+    marker_root = _nearest_project_marker_root(target.parent)
+    if marker_root is not None:
+        return str(marker_root)
+    return str(target.parent)
+
+
+def _path_is_under(child: pathlib.Path, parent: pathlib.Path) -> bool:
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _nearest_project_marker_root(start: pathlib.Path) -> pathlib.Path | None:
+    current = start
+    while True:
+        if _looks_like_project_dir(current):
+            return current
+        if current.parent == current:
+            return None
+        current = current.parent
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ from ._shared import (
     error_dict,
     filter_valid_files,
     gather_workspace_roots,
+    infer_single_project_root,
 )
 
 _log = get_logger("jetbrains_tools")
@@ -176,8 +177,9 @@ async def impl_inspect_files(
             )
 
         unique = dedupe_and_sort(accepted)
-        if project_root:
-            _log.debug("Model-supplied project_root=%s", project_root)
+        pr = infer_single_project_root(unique, roots, project_root)
+        if pr:
+            _log.debug("Effective project_root=%s", pr)
 
         # timeout_ms 入参若提供,临时覆盖环境变量(进程内本次调用生效)。
         if timeout_ms is not None:
@@ -185,9 +187,9 @@ async def impl_inspect_files(
 
         backend = _make_backend()
         result: JetBrainsAnalysisResult = await backend.backend.analyze_files(
-            unique, errors_only=errors_only
+            unique, errors_only=errors_only, project_root=pr
         )
-        return _result_to_dict(result, skipped, start, project_root)
+        return _result_to_dict(result, skipped, start, pr)
     except errors.SonarMcpError as e:
         _log.warning("jetbrains_inspect_files failed: %s", e)
         return error_dict(e, partial=True)
@@ -253,7 +255,9 @@ async def impl_inspect_git_changes(
             )
 
         backend = _make_backend()
-        result = await backend.backend.analyze_files(files, errors_only=errors_only)
+        result = await backend.backend.analyze_files(
+            files, errors_only=errors_only, project_root=norm_root
+        )
         d = _result_to_dict(result, [], start, norm_root)
         d["baseRef"] = base_ref
         d["changedFileCount"] = len(files)

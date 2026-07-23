@@ -43,6 +43,7 @@ from ._shared import (
     error_dict,
     filter_valid_files,
     gather_workspace_roots,
+    infer_single_project_root,
 )
 
 _log = get_logger("quality_tools")
@@ -183,8 +184,7 @@ async def impl_analyze_files(
             )
 
         unique = dedupe_and_sort(accepted)
-        # project_root 推断:优先用户传入;否则用首个文件所在工作区根(已校验)。
-        pr = project_root or _infer_project_root(unique, roots)
+        pr = infer_single_project_root(unique, roots, project_root)
 
         orch = _build_orchestrator()
         result = await orch.analyze_files(
@@ -446,24 +446,6 @@ def _validate_modes(backend_mode: str, deduplication_mode: str) -> None:
             f"Invalid deduplication_mode {deduplication_mode!r}; expected one of "
             f"{sorted(_VALID_DEDUP_MODES)}."
         )
-
-
-def _infer_project_root(files: list[str], roots: list[str]) -> str | None:
-    """从首个文件推断 project_root:取包含它的工作区根"""
-    if not files or not roots:
-        return None
-    first = files[0]
-    for r in roots:
-        if _within(first, r):
-            return r
-    # 兜底:取首个文件所在目录。
-    return os.path.dirname(first)
-
-
-def _within(child: str, parent: str) -> bool:
-    nc = os.path.normcase(os.path.normpath(child))
-    np_ = os.path.normcase(os.path.normpath(parent)).rstrip(os.sep)
-    return nc == np_ or nc.startswith(np_ + os.sep)
 
 
 __all__ = [

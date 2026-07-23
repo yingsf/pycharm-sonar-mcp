@@ -82,6 +82,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     jb_cfg.set_defaults(func=_cmd_jetbrains_configure)
     jb_status = jb_sub.add_parser("status", help="Show JetBrains MCP status.")
+    jb_status.add_argument(
+        "--project-root",
+        dest="project_root",
+        default=None,
+        help="Optional project root used to route newer PyCharm MCP sessions.",
+    )
     jb_status.set_defaults(func=_cmd_jetbrains_status)
     jb_clear = jb_sub.add_parser("clear", help="Remove stored JetBrains MCP config.")
     jb_clear.set_defaults(func=_cmd_jetbrains_clear)
@@ -230,10 +236,14 @@ def _save_jetbrains_config(json_input: str) -> int:
     from .backends.jetbrains.analyzer import JetBrainsAnalysisBackend
     from .backends.jetbrains.client import REQUIRED_TOOLS
 
+    stored_headers = jb_config.headers_for_storage(headers)
+    verify_project_root = jb_config.project_path_from_headers(headers)
+
     async def _verify() -> tuple[bool, str]:
         try:
-            backend = JetBrainsAnalysisBackend()
-            status = await backend.get_status()
+            cfg = jb_config.JetBrainsConfig(url=url, headers=stored_headers)
+            backend = JetBrainsAnalysisBackend(cfg)
+            status = await backend.get_status(project_root=verify_project_root)
             if not status.get("available"):
                 return False, str(status.get("error") or "connection failed")
             tools = status.get("tools") or []
@@ -300,7 +310,7 @@ def _jetbrains_stream_candidates(obj: dict[str, object]) -> list[dict[str, objec
     return candidates
 
 
-def _cmd_jetbrains_status(_args: argparse.Namespace) -> int:
+def _cmd_jetbrains_status(args: argparse.Namespace) -> int:
     """打印 JetBrains MCP 当前配置与连接状态"""
     import asyncio
 
@@ -319,10 +329,12 @@ def _cmd_jetbrains_status(_args: argparse.Namespace) -> int:
 
     from .backends.jetbrains.analyzer import JetBrainsAnalysisBackend
 
+    project_root = _resolve_status_project_root(getattr(args, "project_root", None))
+
     async def _probe() -> dict[str, Any]:
         try:
             backend = JetBrainsAnalysisBackend()
-            return await backend.get_status()
+            return await backend.get_status(project_root=project_root)
         except Exception as e:  # pragma: no cover - defensive
             return {"available": False, "error": str(e)}
 
@@ -339,6 +351,37 @@ def _cmd_jetbrains_status(_args: argparse.Namespace) -> int:
         print(f"Error:         {err}", file=sys.stderr)
         return 1
     return 0 if status.get("available") else 1
+
+
+def _resolve_status_project_root(project_root: str | None) -> str | None:
+    from pathlib import Path
+
+    from .core.path_utils import normalize_path
+
+    if project_root:
+        return normalize_path(project_root)
+    cwd = Path.cwd()
+    home = Path.home()
+    if _same_cli_dir(cwd, home):
+        return None
+    markers = (".git", ".hg", "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
+    if any((cwd / marker).exists() for marker in markers):
+        return str(cwd.resolve())
+    return None
+
+
+def _same_cli_dir(left: Any, right: Any) -> bool:
+    import os
+
+    try:
+        left_s = str(left.resolve())
+    except OSError:
+        left_s = str(left.absolute())
+    try:
+        right_s = str(right.resolve())
+    except OSError:
+        right_s = str(right.absolute())
+    return os.path.normcase(os.path.normpath(left_s)) == os.path.normcase(os.path.normpath(right_s))
 
 
 def _cmd_jetbrains_clear(_args: argparse.Namespace) -> int:

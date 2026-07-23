@@ -19,7 +19,7 @@ import httpx
 
 from ... import errors
 from ...logging_config import get_logger
-from .config import JetBrainsConfig
+from .config import PROJECT_PATH_HEADER, JetBrainsConfig, is_project_path_header
 from .models import JetBrainsProblem
 from .parser import parse_get_file_problems_result, parse_project_status
 
@@ -59,9 +59,15 @@ class JetBrainsClient:
     并校验两个必需工具存在。
     """
 
-    def __init__(self, config: JetBrainsConfig, timeout_ms: int = 30000) -> None:
+    def __init__(
+        self,
+        config: JetBrainsConfig,
+        timeout_ms: int = 30000,
+        project_root: str | None = None,
+    ) -> None:
         self._config = config
         self._timeout_s = max(1.0, timeout_ms / 1000.0)
+        self._project_root = project_root.strip() if isinstance(project_root, str) else None
         # 由 connect() 创建的资源,close() 时清理。
         self._exit_stack: contextlib.AsyncExitStack | None = None
         self._session: ClientSession | None = None
@@ -87,7 +93,7 @@ class JetBrainsClient:
         try:
             # 1. httpx.AsyncClient(承载 headers,不走弃用的 headers 参数)
             http_client = await exit_stack.enter_async_context(
-                _http_client(self._config, self._timeout_s)
+                _http_client(self._config, self._timeout_s, self._project_root)
             )
             # 2. streamable_http_client(显式注入 http_client)
             transport_ctx = streamable_http_client(self._config.url, http_client=http_client)
@@ -111,6 +117,13 @@ class JetBrainsClient:
             except TimeoutError as e:
                 raise errors.jetbrains_timeout(
                     f"JetBrains MCP initialize timed out after {self._timeout_s:.0f}s."
+                ) from e
+            except asyncio.CancelledError as e:
+                if _task_is_externally_cancelled():
+                    raise
+                raise errors.jetbrains_connection_failed(
+                    "JetBrains MCP initialize was cancelled by the HTTP transport. "
+                    "Re-copy PyCharm's MCP config and make sure the target project is open."
                 ) from e
             except Exception as e:
                 raise errors.jetbrains_connection_failed(
@@ -146,6 +159,13 @@ class JetBrainsClient:
         except TimeoutError as e:
             raise errors.jetbrains_timeout(
                 f"JetBrains MCP tools/list timed out after {self._timeout_s:.0f}s."
+            ) from e
+        except asyncio.CancelledError as e:
+            if _task_is_externally_cancelled():
+                raise
+            raise errors.jetbrains_connection_failed(
+                "JetBrains MCP tools/list was cancelled by the HTTP transport. "
+                "Re-copy PyCharm's MCP config and make sure the target project is open."
             ) from e
         except Exception as e:
             raise errors.jetbrains_connection_failed(f"JetBrains MCP tools/list failed: {e}") from e
@@ -195,6 +215,12 @@ class JetBrainsClient:
             raise errors.jetbrains_timeout(
                 f"get_project_status timed out after {self._timeout_s:.0f}s."
             ) from e
+        except asyncio.CancelledError as e:
+            if _task_is_externally_cancelled():
+                raise
+            raise errors.jetbrains_tool_failed(
+                "get_project_status was cancelled by the HTTP transport."
+            ) from e
         except errors.SonarMcpError:
             raise
         except Exception as e:
@@ -243,6 +269,12 @@ class JetBrainsClient:
         except TimeoutError as e:
             raise errors.jetbrains_timeout(
                 f"get_file_problems timed out after {self._timeout_s:.0f}s for {file_path}."
+            ) from e
+        except asyncio.CancelledError as e:
+            if _task_is_externally_cancelled():
+                raise
+            raise errors.jetbrains_tool_failed(
+                f"get_file_problems was cancelled by the HTTP transport for {file_path}."
             ) from e
         except errors.SonarMcpError:
             raise
@@ -306,17 +338,38 @@ class JetBrainsClient:
 
 @contextlib.asynccontextmanager
 async def _http_client(
-    config: JetBrainsConfig, timeout_s: float
+    config: JetBrainsConfig, timeout_s: float, project_root: str | None
 ) -> AsyncIterator[httpx.AsyncClient]:
     """构造带 headers 的 httpx.AsyncClient 作为 streamable_http 的底层 HTTP"""
     client = httpx.AsyncClient(
-        headers=dict(config.headers) if config.headers else None,
+        headers=_effective_headers(config, project_root),
         timeout=httpx.Timeout(timeout_s),
     )
     try:
         yield client
     finally:
         await client.aclose()
+
+
+def _effective_headers(
+    config: JetBrainsConfig, project_root: str | None = None
+) -> dict[str, str] | None:
+    """合成本次连接 headers;project_root 覆盖旧配置里的项目绑定 header"""
+    if not project_root:
+        return dict(config.headers) if config.headers else None
+
+    headers = {
+        str(key): str(value)
+        for key, value in config.headers.items()
+        if not is_project_path_header(str(key))
+    }
+    headers[PROJECT_PATH_HEADER] = project_root
+    return headers
+
+
+def _task_is_externally_cancelled() -> bool:
+    task = asyncio.current_task()
+    return bool(task is not None and task.cancelling())
 
 
 def _unpack_streams(
