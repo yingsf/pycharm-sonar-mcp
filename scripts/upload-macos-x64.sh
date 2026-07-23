@@ -28,6 +28,12 @@ REPO="yingsf/pycharm-code-quality-mcp"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$REPO_ROOT/pyinstaller/dist"
+CURL_AUTH_CONFIG=""
+
+cleanup() {
+  rm -f "$CURL_AUTH_CONFIG" /tmp/.pcqm_upload_resp /tmp/.pcqm_sums /tmp/.pcqm_sums.new /tmp/.pcqm_rel.json
+}
+trap cleanup EXIT
 
 log()  { printf '%s\n' "$*"; }
 err()  { printf 'error: %s\n' "$*" >&2; }
@@ -50,6 +56,12 @@ if [ -z "${GH_TOKEN:-}" ]; then
   err "然后: GH_TOKEN=ghp_xxx $0 $TAG"
   exit 2
 fi
+TOKEN_VALUE="$GH_TOKEN"
+unset GH_TOKEN
+CURL_AUTH_CONFIG="$(mktemp "${TMPDIR:-/tmp}/pcqm-curl-auth.XXXXXX")"
+chmod 600 "$CURL_AUTH_CONFIG"
+printf 'header = "Authorization: token %s"\n' "$TOKEN_VALUE" > "$CURL_AUTH_CONFIG"
+TOKEN_VALUE=""
 
 # --- 架构校验:必须是 Intel x86_64 ---
 ARCH="$(uname -m)"
@@ -67,7 +79,7 @@ fi
 # --- 校验 tag 对应的 Release 存在 ---
 log "校验 Release $TAG 是否存在..."
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: token $GH_TOKEN" \
+  -K "$CURL_AUTH_CONFIG" \
   "https://api.github.com/repos/$REPO/releases/tags/$TAG")
 if [ "$HTTP_CODE" != "200" ]; then
   err "Release $TAG 不存在 (HTTP $HTTP_CODE)。请先打 tag 触发 CI 创建 Release。"
@@ -113,7 +125,7 @@ esac
 # --- 上传到 Release ---
 log "上传 $ASSET_NAME 到 Release $TAG..."
 REL_JSON="/tmp/.pcqm_rel.json"
-curl -s -H "Authorization: token $GH_TOKEN" \
+curl -s -K "$CURL_AUTH_CONFIG" \
   "https://api.github.com/repos/$REPO/releases/tags/$TAG" -o "$REL_JSON"
 
 # 用 python3 解析 JSON,避免 grep/sed 在含特殊字符的字段上出错。
@@ -133,12 +145,12 @@ for a in r.get('assets', []):
 " || true)
 if [ -n "$ASSET_ID" ]; then
   log "已存在同名 asset (id=$ASSET_ID),先删除..."
-  curl -s -X DELETE -H "Authorization: token $GH_TOKEN" \
+  curl -s -X DELETE -K "$CURL_AUTH_CONFIG" \
     "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID" -o /dev/null -w "delete: HTTP %{http_code}\n"
 fi
 
 UPLOAD_HTTP=$(curl -s -o /tmp/.pcqm_upload_resp -w "%{http_code}" \
-  -X POST -H "Authorization: token $GH_TOKEN" \
+  -X POST -K "$CURL_AUTH_CONFIG" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @"$BINARY_PATH" \
   "$UPLOAD_URL?name=$ASSET_NAME")
@@ -151,7 +163,7 @@ log "上传成功。SHA-256: $SHA"
 
 # --- 刷新 SHA256SUMS ---
 log "刷新 SHA256SUMS..."
-curl -sL -H "Authorization: token $GH_TOKEN" \
+curl -sL -K "$CURL_AUTH_CONFIG" \
   "https://github.com/$REPO/releases/download/$TAG/SHA256SUMS" -o /tmp/.pcqm_sums || true
 # 移除旧的 Intel 条目(若有),再追加新的,保持每行唯一。
 if [ -s /tmp/.pcqm_sums ]; then
@@ -161,7 +173,7 @@ else
 fi
 echo "$SHA  $ASSET_NAME" >> /tmp/.pcqm_sums.new
 
-SUMS_ASSET_ID=$(curl -s -H "Authorization: token $GH_TOKEN" \
+SUMS_ASSET_ID=$(curl -s -K "$CURL_AUTH_CONFIG" \
   "https://api.github.com/repos/$REPO/releases/tags/$TAG" -o "$REL_JSON" \
   && python3 -c "
 import json
@@ -171,16 +183,14 @@ for a in r.get('assets', []):
         print(a['id']); break
 " || true)
 if [ -n "$SUMS_ASSET_ID" ]; then
-  curl -s -X DELETE -H "Authorization: token $GH_TOKEN" \
+  curl -s -X DELETE -K "$CURL_AUTH_CONFIG" \
     "https://api.github.com/repos/$REPO/releases/assets/$SUMS_ASSET_ID" -o /dev/null
 fi
 curl -s -o /dev/null -w "SHA256SUMS 上传: HTTP %{http_code}\n" \
-  -X POST -H "Authorization: token $GH_TOKEN" \
+  -X POST -K "$CURL_AUTH_CONFIG" \
   -H "Content-Type: text/plain" \
   --data-binary @/tmp/.pcqm_sums.new \
   "$UPLOAD_URL?name=SHA256SUMS"
-
-rm -f /tmp/.pcqm_upload_resp /tmp/.pcqm_sums /tmp/.pcqm_sums.new /tmp/.pcqm_rel.json
 
 log ""
 log "完成。Release $TAG 现已包含 ${ASSET_NAME}。"
