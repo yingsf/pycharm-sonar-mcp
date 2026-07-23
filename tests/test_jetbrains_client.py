@@ -36,6 +36,22 @@ from pycharm_code_quality_mcp.backends.jetbrains.config import (
     project_path_from_headers,
 )
 
+
+class _FakeToolResult:
+    def __init__(self, structured_content: dict | None = None) -> None:
+        self.isError = False
+        self.structuredContent = structured_content or {"errors": []}
+        self.content = []
+
+
+class _RecordingSession:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict | None]] = []
+
+    async def call_tool(self, name: str, arguments: dict | None = None) -> _FakeToolResult:
+        self.calls.append((name, arguments))
+        return _FakeToolResult()
+
 # ---------------------------------------------------------------------------
 # 配置与白名单
 # ---------------------------------------------------------------------------
@@ -191,6 +207,57 @@ def test_get_project_status_degrades_when_tool_missing() -> None:
     result = asyncio.run(client.get_project_status())
     assert result["isIndexing"] is False
     assert result["projectStatusAvailable"] is False
+
+
+def test_get_file_problems_sends_errors_only_false_by_default() -> None:
+    cfg = JetBrainsConfig(url="http://localhost:1/mcp", headers={})
+    client = JetBrainsClient(cfg)
+    session = _RecordingSession()
+    client._session = session  # type: ignore[assignment]
+
+    asyncio.run(
+        client.get_file_problems(
+            "/tmp/project/src/a.py",
+            project_root="/tmp/project",
+        )
+    )
+
+    assert session.calls == [
+        (
+            "get_file_problems",
+            {
+                "projectPath": "/tmp/project",
+                "filePath": "src/a.py",
+                "errorsOnly": False,
+            },
+        )
+    ]
+
+
+def test_get_file_problems_sends_errors_only_true_when_requested() -> None:
+    cfg = JetBrainsConfig(url="http://localhost:1/mcp", headers={})
+    client = JetBrainsClient(cfg)
+    session = _RecordingSession()
+    client._session = session  # type: ignore[assignment]
+
+    asyncio.run(
+        client.get_file_problems(
+            "/tmp/project/src/a.py",
+            project_root="/tmp/project",
+            errors_only=True,
+        )
+    )
+
+    assert session.calls == [
+        (
+            "get_file_problems",
+            {
+                "projectPath": "/tmp/project",
+                "filePath": "src/a.py",
+                "errorsOnly": True,
+            },
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------

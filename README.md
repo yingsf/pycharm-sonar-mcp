@@ -337,7 +337,7 @@ PyCharm Sonar MCP Doctor
 
 == General ==
 [OK] Operating system: macOS 26.5 x64
-[OK] MCP version: 1.0.2
+[OK] MCP version: 1.0.3
 ...
 
 == JetBrains ==

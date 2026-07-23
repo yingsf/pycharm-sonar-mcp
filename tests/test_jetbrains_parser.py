@@ -121,8 +121,8 @@ def test_malformed_problem_skipped_not_raised() -> None:
 
 
 def test_fields_aliases_supported() -> None:
-    """同时支持 problems/findings/diagnostics/issues 多种字段名"""
-    for key in ("problems", "findings", "diagnostics", "issues"):
+    """同时支持 errors/problems/findings/diagnostics/issues 多种字段名"""
+    for key in ("errors", "problems", "findings", "diagnostics", "issues"):
         structured = {
             key: [
                 {
@@ -138,6 +138,28 @@ def test_fields_aliases_supported() -> None:
         }
         problems = parse_get_file_problems_result([], structured, _FILE)
         assert len(problems) == 1, f"failed for key={key}"
+
+
+def test_pycharm_errors_warning_shape_supported() -> None:
+    structured = {
+        "filePath": "src/a.py",
+        "errors": [
+            {
+                "severity": "WARNING",
+                "description": "No overloads for join match arguments",
+                "lineContent": "','.join(statuses)",
+                "line": 162,
+                "column": 35,
+            }
+        ],
+    }
+    problems = parse_get_file_problems_result([], structured, _FILE)
+
+    assert len(problems) == 1
+    assert problems[0].severity == "WARNING"
+    assert problems[0].start_line == 162
+    assert problems[0].start_column == 35
+    assert problems[0].file_path == _FILE
 
 
 # ---------------------------------------------------------------------------

@@ -259,8 +259,7 @@ class JetBrainsClient:
         else:
             # 没有 project_root 时退回绝对路径(可能被 PyCharm 拒绝,但保留兼容)。
             arguments["filePath"] = file_path
-        if errors_only:
-            arguments["errorsOnly"] = True
+        arguments["errorsOnly"] = errors_only
         try:
             result = await asyncio.wait_for(
                 session.call_tool("get_file_problems", arguments=arguments),

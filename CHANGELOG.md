@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-07-23
+
+### Fixed
+- **JetBrains warning retrieval on newer PyCharm MCP**: `get_file_problems` now
+  sends `errorsOnly=false` explicitly during default analysis, preventing newer
+  PyCharm versions from returning only errors and hiding warning-level inspections.
+
 ## [1.0.2] — 2026-07-23
 
 ### Fixed
